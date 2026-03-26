@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS Simulator — Android Emulator</title>
+  <meta name="description" content="Simulate realistic GPS movement on Android Emulator">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Connection Panel -->
+  <div class="panel panel-connection" id="connectionPanel">
+    <div class="panel-header">
+      <div class="status-dot" id="statusDot"></div>
+      <h3>Emulator Connection</h3>
+      <button class="btn-icon" id="toggleConnection" title="Toggle panel">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="panel-body" id="connectionBody">
+      <div class="input-row">
+        <div class="input-group">
+          <label>Host</label>
+          <input type="text" id="hostInput" value="localhost" placeholder="localhost">
+        </div>
+        <div class="input-group" style="width: 100px;">
+          <label>Port</label>
+          <input type="number" id="portInput" value="5554" placeholder="5554">
+        </div>
+      </div>
+      <button class="btn btn-primary" id="connectBtn">
+        <span class="btn-text">Connect</span>
+      </button>
+      <div class="status-text" id="statusText">Disconnected</div>
+    </div>
+  </div>
+
+  <!-- Live Stats Panel (top-right) -->
+  <div class="panel panel-info" id="infoPanel">
+    <div class="panel-header">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><path d="M12 2v20M2 12h20"/>
+      </svg>
+      <h3>Live Stats</h3>
+    </div>
+    <div class="panel-body">
+      <div class="coord-display">
+        <div class="coord-item">
+          <span class="coord-label">LAT</span>
+          <span class="coord-value" id="latDisplay">—</span>
+        </div>
+        <div class="coord-item">
+          <span class="coord-label">LNG</span>
+          <span class="coord-value" id="lngDisplay">—</span>
+        </div>
+      </div>
+      <div class="stat-grid" id="statsGrid" style="display:none;">
+        <div class="stat-card">
+          <span class="stat-icon">🏃</span>
+          <span class="stat-value" id="currentSpeedDisplay">—</span>
+          <span class="stat-unit">km/h</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-icon">⛰️</span>
+          <span class="stat-value" id="altitudeDisplay">—</span>
+          <span class="stat-unit">m</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-icon">📏</span>
+          <span class="stat-value" id="distanceDisplay">—</span>
+          <span class="stat-unit" id="distanceUnit">m</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-icon">📐</span>
+          <span class="stat-value" id="gradientDisplay">—</span>
+          <span class="stat-unit">%</span>
+        </div>
+        <div class="stat-card" id="lapCard" style="display:none;">
+          <span class="stat-icon">🔄</span>
+          <span class="stat-value" id="lapDisplay">—</span>
+          <span class="stat-unit">lap</span>
+        </div>
+        <div class="stat-card pause-indicator" id="pauseCard" style="display:none;">
+          <span class="stat-icon">⏸️</span>
+          <span class="stat-value" id="pauseDisplay">—</span>
+          <span class="stat-unit" id="pauseUnit">s</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Route Control Panel -->
+  <div class="panel panel-route" id="routePanel">
+    <div class="panel-header">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+      <h3>Route Simulation</h3>
+    </div>
+    <div class="panel-body">
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="modeClick" data-mode="click">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+          </svg>
+          Point
+        </button>
+        <button class="mode-btn" id="modeRoute" data-mode="route">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/>
+          </svg>
+          Route
+        </button>
+        <button class="mode-btn" id="modeImport">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          GPX
+        </button>
+      </div>
+      <input type="file" id="gpxFileInput" accept=".gpx,.xml" class="hidden">
+
+      <div id="routeControls" class="route-controls hidden">
+        <!-- Activity Profile Selector -->
+        <div class="profile-selector">
+          <label class="profile-label">Activity:</label>
+          <div class="profile-buttons">
+            <button class="profile-btn active" data-profile="custom" id="profileCustom">⚙️ Custom</button>
+            <button class="profile-btn" data-profile="walking" id="profileWalking">🚶 Walk</button>
+            <button class="profile-btn" data-profile="jogging" id="profileJogging">🏃 Jog</button>
+            <button class="profile-btn" data-profile="running" id="profileRunning">🏃‍♂️ Run</button>
+            <button class="profile-btn" data-profile="cycling" id="profileCycling">🚴 Bike</button>
+          </div>
+        </div>
+
+        <div class="waypoint-count">
+          <span id="waypointCount">0</span> waypoints
+          <span class="route-distance" id="routeDistance"></span>
+        </div>
+
+        <div class="speed-control">
+          <label>Target Speed: <strong id="speedValue">10</strong> km/h</label>
+          <input type="range" id="speedSlider" min="1" max="60" value="10" class="slider">
+          <div class="speed-hint">Actual speed varies naturally ±10%</div>
+        </div>
+
+        <div class="option-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="jitterToggle" checked>
+            <span class="toggle-switch"></span>
+            GPS Randomize
+          </label>
+          <div class="jitter-intensity" id="jitterIntensityContainer">
+            <input type="range" id="jitterSlider" min="1" max="30" value="10" class="slider slider-sm">
+            <span class="jitter-value" id="jitterValue">1.0×</span>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="loopToggle">
+            <span class="toggle-switch"></span>
+            Loop Mode
+          </label>
+          <div class="loop-laps hidden" id="loopLapsContainer">
+            <label>Laps:</label>
+            <input type="number" id="lapCount" value="3" min="2" max="100" class="input-tiny">
+          </div>
+        </div>
+
+        <div class="option-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="autoPauseToggle" checked>
+            <span class="toggle-switch"></span>
+            Auto Rest Stops
+          </label>
+          <span class="option-hint">Pauses at intersections &amp; every 2-5km</span>
+        </div>
+
+        <!-- Advanced Settings (Collapsible) -->
+        <div class="advanced-settings">
+          <button class="advanced-toggle" id="advancedToggle">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" class="chevron">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Advanced Settings
+          </button>
+          <div class="advanced-body hidden" id="advancedBody">
+
+            <!-- Speed Group -->
+            <div class="settings-group">
+              <div class="settings-group-title">🏃 Speed Behavior</div>
+              <div class="setting-item">
+                <label>Pace Variation <span class="setting-val" id="paceVarVal">100%</span></label>
+                <input type="range" id="paceVarSlider" min="0" max="200" value="100" class="slider slider-sm">
+                <div class="setting-hint">0% = constant speed, 100% = natural (±10%)</div>
+              </div>
+              <div class="setting-item">
+                <label>Turn Slowdown <span class="setting-val" id="turnSlowVal">40%</span></label>
+                <input type="range" id="turnSlowSlider" min="0" max="60" value="40" class="slider slider-sm">
+                <div class="setting-hint">Max speed reduction at sharp turns</div>
+              </div>
+              <div class="setting-item">
+                <label>Gradient Effect <span class="setting-val" id="gradientEffVal">100%</span></label>
+                <input type="range" id="gradientEffSlider" min="0" max="200" value="100" class="slider slider-sm">
+                <div class="setting-hint">0% = ignore hills, 100% = realistic slope effect</div>
+              </div>
+            </div>
+
+            <!-- Phase Group -->
+            <div class="settings-group">
+              <div class="settings-group-title">⚡ Warm-up / Cool-down</div>
+              <div class="setting-item">
+                <label>Warm-up Duration <span class="setting-val" id="warmupVal">Auto</span></label>
+                <input type="range" id="warmupSlider" min="0" max="300" value="0" class="slider slider-sm">
+                <div class="setting-hint">0 = auto (10% of route), or set 1-300 seconds</div>
+              </div>
+              <div class="setting-item">
+                <label>Cool-down Duration <span class="setting-val" id="cooldownVal">Auto</span></label>
+                <input type="range" id="cooldownSlider" min="0" max="300" value="0" class="slider slider-sm">
+                <div class="setting-hint">0 = auto (8% of route), or set 1-300 seconds</div>
+              </div>
+            </div>
+
+            <!-- Pause Group -->
+            <div class="settings-group">
+              <div class="settings-group-title">⏸️ Pause Behavior</div>
+              <div class="setting-item">
+                <label>Intersection Pause Chance <span class="setting-val" id="intChanceVal">35%</span></label>
+                <input type="range" id="intChanceSlider" min="0" max="100" value="35" class="slider slider-sm">
+                <div class="setting-hint">Probability of stopping at sharp turns</div>
+              </div>
+              <div class="setting-item">
+                <label>Intersection Pause <span class="setting-val" id="intDurVal">10-45s</span></label>
+                <div class="dual-range">
+                  <input type="number" id="intDurMin" value="10" min="0" max="120" class="input-tiny">
+                  <span class="range-sep">—</span>
+                  <input type="number" id="intDurMax" value="45" min="0" max="120" class="input-tiny">
+                  <span class="range-unit">sec</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <label>Rest Stop Interval <span class="setting-val" id="restIntVal">2-5 km</span></label>
+                <div class="dual-range">
+                  <input type="number" id="restIntMin" value="2" min="1" max="20" step="0.5" class="input-tiny">
+                  <span class="range-sep">—</span>
+                  <input type="number" id="restIntMax" value="5" min="1" max="20" step="0.5" class="input-tiny">
+                  <span class="range-unit">km</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <label>Rest Duration <span class="setting-val" id="restDurVal">30-90s</span></label>
+                <div class="dual-range">
+                  <input type="number" id="restDurMin" value="30" min="0" max="300" class="input-tiny">
+                  <span class="range-sep">—</span>
+                  <input type="number" id="restDurMax" value="90" min="0" max="300" class="input-tiny">
+                  <span class="range-unit">sec</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="route-buttons">
+          <button class="btn btn-success" id="startRouteBtn" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
+            Start
+          </button>
+          <button class="btn btn-warning" id="pauseRouteBtn" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            Pause
+          </button>
+          <button class="btn btn-danger" id="stopRouteBtn" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            Stop
+          </button>
+          <button class="btn btn-ghost" id="clearRouteBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-spinner"></div>
+    <span id="loadingText">Finding road route...</span>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

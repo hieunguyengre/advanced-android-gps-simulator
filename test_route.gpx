@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test">
+  <trk>
+    <name>Test Run Ho Chi Minh</name>
+    <trkseg>
+      <trkpt lat="10.8231" lon="106.6297"><ele>10</ele></trkpt>
+      <trkpt lat="10.8235" lon="106.6302"><ele>11</ele></trkpt>
+      <trkpt lat="10.8240" lon="106.6310"><ele>12</ele></trkpt>
+      <trkpt lat="10.8248" lon="106.6318"><ele>13</ele></trkpt>
+      <trkpt lat="10.8255" lon="106.6325"><ele>12</ele></trkpt>
+      <trkpt lat="10.8260" lon="106.6330"><ele>11</ele></trkpt>
+      <trkpt lat="10.8268" lon="106.6340"><ele>10</ele></trkpt>
+      <trkpt lat="10.8275" lon="106.6350"><ele>11</ele></trkpt>
+      <trkpt lat="10.8280" lon="106.6358"><ele>13</ele></trkpt>
+      <trkpt lat="10.8288" lon="106.6365"><ele>14</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
