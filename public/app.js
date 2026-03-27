@@ -610,6 +610,7 @@
       showToast('Elevation API error (continuing without): ' + err.message, 'error');
       elevations = [];
     }
+    hideLoading();
   }
 
   function clearRoute() {
