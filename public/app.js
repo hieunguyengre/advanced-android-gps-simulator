@@ -362,6 +362,8 @@
       const fromLabel = route.distFromCenter >= 1000
         ? (route.distFromCenter / 1000).toFixed(1) + ' km away'
         : route.distFromCenter + ' m away';
+      const sourceLabel = route.source === 'waymarked' ? 'WMT' : 'OSM';
+      const sourceColor = route.source === 'waymarked' ? '#818cf8' : '#60a5fa';
 
       card.innerHTML = `
         <div class="route-card-header">
@@ -370,6 +372,7 @@
             <div class="route-card-name">${route.name}</div>
             <div class="route-card-meta">
               <span class="route-card-badge" style="background:${color}20;color:${color}">${route.type}</span>
+              <span class="route-card-badge" style="background:${sourceColor}20;color:${sourceColor}">${sourceLabel}</span>
               <span>${distLabel}</span>
               <span class="route-card-sep">•</span>
               <span>${fromLabel}</span>

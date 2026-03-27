@@ -129,7 +129,7 @@ function generateRandomLoopWaypoints(centerLat, centerLng, radiusMeters, targetD
   return waypoints;
 }
 
-// --- Search Routes API (Overpass / OpenStreetMap) ---
+// --- Search Routes API (Multi-Source: Overpass + Waymarked Trails) ---
 app.get('/api/search-routes', async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
@@ -140,60 +140,102 @@ app.get('/api/search-routes', async (req, res) => {
   }
 
   try {
-    // Overpass QL query: find route relations near the point
-    const query = `
-      [out:json][timeout:30];
-      (
-        relation["type"="route"]["route"~"foot|hiking|running|bicycle"](around:${radius},${lat},${lng});
-      );
-      out geom;
-    `;
+    // Query all sources in parallel
+    const [overpassRoutes, wmHikingRoutes, wmCyclingRoutes] = await Promise.allSettled([
+      fetchOverpassRoutes(lat, lng, radius),
+      fetchWaymarkedTrails('hiking', lat, lng, radius),
+      fetchWaymarkedTrails('cycling', lat, lng, radius),
+    ]);
 
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`
+    // Merge results from all sources
+    let allRoutes = [];
+    if (overpassRoutes.status === 'fulfilled') allRoutes.push(...overpassRoutes.value);
+    if (wmHikingRoutes.status === 'fulfilled') allRoutes.push(...wmHikingRoutes.value);
+    if (wmCyclingRoutes.status === 'fulfilled') allRoutes.push(...wmCyclingRoutes.value);
+
+    // Deduplicate by name + approximate distance (some routes appear in multiple sources)
+    const seen = new Set();
+    allRoutes = allRoutes.filter(r => {
+      const key = `${r.name}|${Math.round(r.distance)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
-    if (!response.ok) {
-      throw new Error(`Overpass API returned ${response.status}`);
-    }
+    // Sort by distance from center
+    allRoutes.sort((a, b) => a.distFromCenter - b.distFromCenter);
 
-    const data = await response.json();
-    const routes = parseOverpassRoutes(data.elements || [], lat, lng);
-
-    res.json({ routes, total: routes.length });
+    res.json({ routes: allRoutes, total: allRoutes.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 /**
- * Parse Overpass API response into structured route objects.
+ * Source 1: Overpass API — route relations + named ways
  */
-function parseOverpassRoutes(elements, centerLat, centerLng) {
+async function fetchOverpassRoutes(lat, lng, radius) {
+  // Expanded query: route relations (more types) + named ways (paths, footways, cycleways)
+  const query = `
+    [out:json][timeout:30];
+    (
+      relation["type"="route"]["route"~"foot|hiking|running|bicycle|mtb|fitness_trail"](around:${radius},${lat},${lng});
+      way["highway"~"footway|path|cycleway|track"]["name"](around:${radius},${lat},${lng});
+    );
+    out geom;
+  `;
+
+  const response = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(query)}`
+  });
+
+  if (!response.ok) throw new Error(`Overpass API returned ${response.status}`);
+
+  const data = await response.json();
+  return parseOverpassElements(data.elements || [], lat, lng);
+}
+
+/**
+ * Parse Overpass API response — handles both relations and ways.
+ */
+function parseOverpassElements(elements, centerLat, centerLng) {
   const routes = [];
 
   for (const el of elements) {
-    if (el.type !== 'relation') continue;
-
     const tags = el.tags || {};
-    const name = tags.name || tags['name:en'] || tags.ref || 'Unnamed Route';
-    const routeType = tags.route || 'foot';
+    let geometry = [];
+    let routeType = 'foot';
 
-    // Extract geometry from relation members
-    const geometry = [];
-    if (el.members) {
-      for (const member of el.members) {
-        if (member.type === 'way' && member.geometry) {
-          for (const point of member.geometry) {
-            geometry.push({ lat: point.lat, lng: point.lon });
+    if (el.type === 'relation') {
+      routeType = tags.route || 'foot';
+      if (el.members) {
+        for (const member of el.members) {
+          if (member.type === 'way' && member.geometry) {
+            for (const point of member.geometry) {
+              geometry.push({ lat: point.lat, lng: point.lon });
+            }
           }
         }
       }
+    } else if (el.type === 'way') {
+      // Named ways (footway, path, cycleway, track)
+      const hw = tags.highway || '';
+      if (hw === 'cycleway') routeType = 'bicycle';
+      else if (hw === 'track') routeType = 'hiking';
+      else routeType = 'foot';
+
+      if (el.geometry) {
+        for (const point of el.geometry) {
+          geometry.push({ lat: point.lat, lng: point.lon });
+        }
+      }
+    } else {
+      continue;
     }
 
-    if (geometry.length < 2) continue; // Skip routes with no usable geometry
+    if (geometry.length < 2) continue;
 
     // Calculate total distance
     let totalDistance = 0;
@@ -204,33 +246,113 @@ function parseOverpassRoutes(elements, centerLat, centerLng) {
       );
     }
 
-    // Use tagged distance if available, otherwise calculated
+    // Skip very short ways (< 200m) — noise filter
+    if (el.type === 'way' && totalDistance < 200) continue;
+
+    const name = tags.name || tags['name:en'] || tags.ref || 'Unnamed Route';
     const taggedDistKm = tags.distance ? parseFloat(tags.distance) : null;
     const distanceKm = taggedDistKm || (totalDistance / 1000);
-
-    // Calculate distance from search center to route start
     const distFromCenter = haversineDistance(centerLat, centerLng, geometry[0].lat, geometry[0].lng);
 
     routes.push({
       id: el.id,
-      name: name,
-      type: routeType,
-      distance: Math.round(distanceKm * 100) / 100, // km, 2 decimals
-      distFromCenter: Math.round(distFromCenter), // meters
+      name, type: routeType, source: 'osm',
+      distance: Math.round(distanceKm * 100) / 100,
+      distFromCenter: Math.round(distFromCenter),
       points: geometry.length,
-      geometry: geometry,
+      geometry,
       tags: {
-        surface: tags.surface,
-        network: tags.network,
-        operator: tags.operator,
-        description: tags.description,
+        surface: tags.surface, network: tags.network,
+        operator: tags.operator, description: tags.description,
         website: tags.website
       }
     });
   }
 
-  // Sort by distance from center
-  routes.sort((a, b) => a.distFromCenter - b.distFromCenter);
+  return routes;
+}
+
+/**
+ * Source 2 & 3: Waymarked Trails API — hiking and cycling trails
+ */
+async function fetchWaymarkedTrails(activity, lat, lng, radius) {
+  // Convert center + radius to bounding box
+  const latDeg = radius / 111320;
+  const lngDeg = radius / (111320 * Math.cos(lat * Math.PI / 180));
+  const bbox = `${lng - lngDeg},${lat - latDeg},${lng + lngDeg},${lat + latDeg}`;
+
+  const baseUrl = activity === 'cycling'
+    ? 'https://cycling.waymarkedtrails.org'
+    : 'https://hiking.waymarkedtrails.org';
+
+  const response = await fetch(`${baseUrl}/api/v1/list/by-bbox?bbox=${bbox}&limit=30`, {
+    headers: { 'Accept': 'application/json' }
+  });
+
+  if (!response.ok) return [];
+
+  const data = await response.json();
+  if (!data.results || !Array.isArray(data.results)) return [];
+
+  const routes = [];
+  for (const trail of data.results) {
+    // Fetch geometry for each trail
+    let geometry = [];
+    try {
+      const geoResp = await fetch(`${baseUrl}/api/v1/details/${trail.id}/geometry/geojson`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (geoResp.ok) {
+        const geoData = await geoResp.json();
+        if (geoData.type === 'FeatureCollection' && geoData.features) {
+          for (const feature of geoData.features) {
+            if (feature.geometry && feature.geometry.coordinates) {
+              const coords = feature.geometry.type === 'MultiLineString'
+                ? feature.geometry.coordinates.flat()
+                : feature.geometry.coordinates;
+              for (const c of coords) {
+                geometry.push({ lat: c[1], lng: c[0] });
+              }
+            }
+          }
+        } else if (geoData.coordinates) {
+          const coords = geoData.type === 'MultiLineString'
+            ? geoData.coordinates.flat()
+            : geoData.coordinates;
+          for (const c of coords) {
+            geometry.push({ lat: c[1], lng: c[0] });
+          }
+        }
+      }
+    } catch { /* skip geometry fetch failure */ }
+
+    if (geometry.length < 2) continue;
+
+    const distFromCenter = haversineDistance(lat, lng, geometry[0].lat, geometry[0].lng);
+
+    // Calculate distance from geometry if not provided
+    let totalDist = 0;
+    for (let i = 0; i < geometry.length - 1; i++) {
+      totalDist += haversineDistance(geometry[i].lat, geometry[i].lng, geometry[i + 1].lat, geometry[i + 1].lng);
+    }
+    const distKm = trail.distance ? trail.distance / 1000 : totalDist / 1000;
+
+    routes.push({
+      id: `wmt-${trail.id}`,
+      name: trail.name || trail.ref || 'Waymarked Trail',
+      type: activity === 'cycling' ? 'bicycle' : 'hiking',
+      source: 'waymarked',
+      distance: Math.round(distKm * 100) / 100,
+      distFromCenter: Math.round(distFromCenter),
+      points: geometry.length,
+      geometry,
+      tags: {
+        network: trail.group,
+        description: trail.name,
+        website: `${baseUrl}/#route?id=${trail.id}`
+      }
+    });
+  }
 
   return routes;
 }
