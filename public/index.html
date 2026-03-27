@@ -135,8 +135,33 @@
           </svg>
           Random
         </button>
+        <button class="mode-btn" id="modeSearch">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          Search
+        </button>
       </div>
       <input type="file" id="gpxFileInput" accept=".gpx,.xml" class="hidden">
+
+      <!-- Search Routes Controls -->
+      <div id="searchRoutesControls" class="route-controls hidden">
+        <div class="random-run-info search-info">
+          <span class="random-run-icon">🔍</span>
+          <span>Click on the map to search for routes nearby</span>
+        </div>
+        <div class="speed-control">
+          <label>Search Radius: <strong id="searchRadiusValue">5</strong> km</label>
+          <input type="range" id="searchRadiusSlider" min="1" max="20" value="5" step="1" class="slider">
+          <div class="speed-hint">Area to search for community routes</div>
+        </div>
+        <div id="searchResultsContainer" class="search-results hidden">
+          <div class="search-results-header">
+            <span id="searchResultsCount">0</span> routes found
+          </div>
+          <div id="searchResultsList" class="search-results-list"></div>
+        </div>
+      </div>
 
       <!-- Random Run Controls -->
       <div id="randomRunControls" class="route-controls hidden">

@@ -847,6 +847,114 @@ body {
   transform: translateY(-1px);
 }
 
+/* ===== Search Routes ===== */
+.search-info {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+.search-results { margin-top: 12px; }
+
+.search-results-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-results-header span { color: var(--warning); font-weight: 700; font-size: 13px; }
+
+.search-results-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.search-route-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.search-route-card:hover {
+  background: var(--bg-input-focus);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateX(2px);
+}
+
+.route-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.route-card-icon { font-size: 18px; flex-shrink: 0; }
+
+.route-card-info { min-width: 0; flex: 1; }
+
+.route-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.route-card-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.route-card-sep { opacity: 0.4; }
+
+.btn-sm {
+  font-size: 10px !important;
+  padding: 4px 10px !important;
+  flex-shrink: 0;
+}
+
+.btn-use-route {
+  background: linear-gradient(135deg, #059669, #34d399);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-use-route:hover { box-shadow: 0 2px 8px var(--success-glow); transform: translateY(-1px); }
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .panel { min-width: unset; left: 8px !important; right: 8px !important; max-width: calc(100vw - 16px); }

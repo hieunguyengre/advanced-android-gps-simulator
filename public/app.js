@@ -20,6 +20,9 @@
   let randomCenter = null;
   let randomRadiusCircle = null;
   let randomCenterMarker = null;
+  let searchPreviewPolylines = [];
+  let searchSelectedRoute = null;
+  let searchRadiusCircle = null;
 
   // ===== Activity Profile Presets =====
   const PROFILES = {
@@ -108,6 +111,14 @@
   const generateRandomBtn = $('generateRandomBtn');
   const clearRandomBtn = $('clearRandomBtn');
 
+  // Search routes controls
+  const searchRoutesControls = $('searchRoutesControls');
+  const searchRadiusSlider = $('searchRadiusSlider');
+  const searchRadiusValue = $('searchRadiusValue');
+  const searchResultsContainer = $('searchResultsContainer');
+  const searchResultsCount = $('searchResultsCount');
+  const searchResultsList = $('searchResultsList');
+
   // Advanced settings refs
   const advancedToggle = $('advancedToggle');
   const advancedBody = $('advancedBody');
@@ -153,6 +164,8 @@
       addWaypoint(lat, lng);
     } else if (mode === 'random') {
       setRandomCenter(lat, lng);
+    } else if (mode === 'search') {
+      searchRoutes(lat, lng);
     }
   }
 
@@ -268,6 +281,189 @@
     if (randomCenterMarker) { map.removeLayer(randomCenterMarker); randomCenterMarker = null; }
     if (randomRadiusCircle) { map.removeLayer(randomRadiusCircle); randomRadiusCircle = null; }
     generateRandomBtn.disabled = true;
+    clearRoute();
+    routeControls.classList.add('hidden');
+  }
+
+  // --- Search Routes ---
+  async function searchRoutes(lat, lng) {
+    const radius = parseInt(searchRadiusSlider.value) * 1000; // km to meters
+    showLoading('Searching for routes nearby...');
+
+    // Show search area circle
+    if (searchRadiusCircle) {
+      searchRadiusCircle.setLatLng([lat, lng]);
+      searchRadiusCircle.setRadius(radius);
+    } else {
+      searchRadiusCircle = L.circle([lat, lng], {
+        radius: radius,
+        color: '#f59e0b',
+        fillColor: '#f59e0b',
+        fillOpacity: 0.05,
+        weight: 2,
+        dashArray: '8, 6'
+      }).addTo(map);
+    }
+
+    // Clear previous preview polylines
+    clearSearchPreviews();
+
+    try {
+      const resp = await fetch(
+        `/api/search-routes?lat=${lat}&lng=${lng}&radius=${radius}`
+      );
+      const data = await resp.json();
+
+      if (data.error) {
+        showToast('Search error: ' + data.error, 'error');
+        hideLoading();
+        return;
+      }
+
+      if (!data.routes || data.routes.length === 0) {
+        showToast('No routes found in this area. Try a larger radius or different location.', 'info');
+        searchResultsContainer.classList.add('hidden');
+        hideLoading();
+        return;
+      }
+
+      showToast(`Found ${data.routes.length} route(s)!`, 'success');
+      renderSearchResults(data.routes);
+
+    } catch (err) {
+      showToast('Search error: ' + err.message, 'error');
+    }
+
+    hideLoading();
+  }
+
+  function renderSearchResults(routes) {
+    searchResultsContainer.classList.remove('hidden');
+    searchResultsCount.textContent = routes.length;
+    searchResultsList.innerHTML = '';
+
+    const typeIcons = {
+      foot: '🚶', hiking: '🥾', running: '🏃', bicycle: '🚴'
+    };
+    const typeColors = {
+      foot: '#34d399', hiking: '#f59e0b', running: '#f87171', bicycle: '#6387ff'
+    };
+
+    routes.forEach((route, index) => {
+      const card = document.createElement('div');
+      card.className = 'search-route-card';
+      card.dataset.index = index;
+
+      const icon = typeIcons[route.type] || '🗺️';
+      const color = typeColors[route.type] || '#a78bfa';
+      const distLabel = route.distance >= 1
+        ? route.distance.toFixed(1) + ' km'
+        : Math.round(route.distance * 1000) + ' m';
+      const fromLabel = route.distFromCenter >= 1000
+        ? (route.distFromCenter / 1000).toFixed(1) + ' km away'
+        : route.distFromCenter + ' m away';
+
+      card.innerHTML = `
+        <div class="route-card-header">
+          <span class="route-card-icon">${icon}</span>
+          <div class="route-card-info">
+            <div class="route-card-name">${route.name}</div>
+            <div class="route-card-meta">
+              <span class="route-card-badge" style="background:${color}20;color:${color}">${route.type}</span>
+              <span>${distLabel}</span>
+              <span class="route-card-sep">•</span>
+              <span>${fromLabel}</span>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-use-route" data-idx="${index}">Use Route</button>
+      `;
+
+      // Hover preview
+      card.addEventListener('mouseenter', () => {
+        clearSearchPreviews();
+        const latlngs = route.geometry.map(p => [p.lat, p.lng]);
+        const previewLine = L.polyline(latlngs, {
+          color: color, weight: 3, opacity: 0.6, dashArray: '6, 4'
+        }).addTo(map);
+        searchPreviewPolylines.push(previewLine);
+        map.fitBounds(L.latLngBounds(latlngs), { padding: [60, 60] });
+      });
+
+      // Click "Use Route" button
+      card.querySelector('.btn-use-route').addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectSearchRoute(route);
+      });
+
+      searchResultsList.appendChild(card);
+    });
+  }
+
+  function selectSearchRoute(route) {
+    clearSearchPreviews();
+    clearRoute();
+
+    // Load route geometry
+    routePoints = route.geometry;
+    waypoints = [routePoints[0], routePoints[routePoints.length - 1]];
+
+    // Draw route
+    const latlngs = routePoints.map(p => [p.lat, p.lng]);
+    const typeColors = {
+      foot: '#34d399', hiking: '#f59e0b', running: '#f87171', bicycle: '#6387ff'
+    };
+    const color = typeColors[route.type] || '#a78bfa';
+
+    if (routePolyline) { routePolyline.setLatLngs(latlngs); }
+    else {
+      routePolyline = L.polyline(latlngs, {
+        color: color, weight: 4, opacity: 0.85,
+        smoothFactor: 1, lineCap: 'round', lineJoin: 'round'
+      }).addTo(map);
+    }
+
+    // Add start/end markers
+    const startMarker = L.circleMarker([routePoints[0].lat, routePoints[0].lng], {
+      radius: 8, color: '#fff', fillColor: '#34d399', fillOpacity: 1, weight: 2
+    }).addTo(map).bindPopup('<b>Start</b>');
+    const endMarker = L.circleMarker(
+      [routePoints[routePoints.length - 1].lat, routePoints[routePoints.length - 1].lng],
+      { radius: 8, color: '#fff', fillColor: '#ef4444', fillOpacity: 1, weight: 2 }
+    ).addTo(map).bindPopup('<b>End</b>');
+    waypointMarkers.push(startMarker, endMarker);
+
+    // Calculate distance
+    let totalDist = 0;
+    for (let i = 0; i < routePoints.length - 1; i++) {
+      totalDist += haversine(routePoints[i].lat, routePoints[i].lng, routePoints[i + 1].lat, routePoints[i + 1].lng);
+    }
+    const distKm = (totalDist / 1000).toFixed(2);
+    routeDistance.textContent = `(${distKm} km)`;
+
+    showToast(`Selected: ${route.name} (${distKm} km)`, 'success');
+
+    // Fetch elevation
+    fetchElevations();
+
+    // Fit map
+    map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
+
+    // Show route controls
+    routeControls.classList.remove('hidden');
+    updateRouteUI();
+  }
+
+  function clearSearchPreviews() {
+    searchPreviewPolylines.forEach(p => map.removeLayer(p));
+    searchPreviewPolylines = [];
+  }
+
+  function clearSearchMode() {
+    clearSearchPreviews();
+    if (searchRadiusCircle) { map.removeLayer(searchRadiusCircle); searchRadiusCircle = null; }
+    searchResultsContainer.classList.add('hidden');
+    searchResultsList.innerHTML = '';
     clearRoute();
     routeControls.classList.add('hidden');
   }
@@ -769,8 +965,10 @@
       modeRoute.classList.remove('active');
       $('modeImport').classList.remove('active');
       $('modeRandom').classList.remove('active');
+      $('modeSearch').classList.remove('active');
       routeControls.classList.add('hidden');
       randomRunControls.classList.add('hidden');
+      searchRoutesControls.classList.add('hidden');
       map.getContainer().style.cursor = '';
     }
 
@@ -827,6 +1025,24 @@
 
     generateRandomBtn.addEventListener('click', () => generateRandomRoute());
     clearRandomBtn.addEventListener('click', () => clearRandomRun());
+
+    // Search mode
+    $('modeSearch').addEventListener('click', () => {
+      deactivateAllModes();
+      mode = 'search';
+      $('modeSearch').classList.add('active');
+      searchRoutesControls.classList.remove('hidden');
+      map.getContainer().style.cursor = 'crosshair';
+    });
+
+    searchRadiusSlider.addEventListener('input', () => {
+      searchRadiusValue.textContent = searchRadiusSlider.value;
+      updateSliderBg(searchRadiusSlider, 1, 20);
+      if (searchRadiusCircle) {
+        searchRadiusCircle.setRadius(parseInt(searchRadiusSlider.value) * 1000);
+      }
+    });
+    updateSliderBg(searchRadiusSlider, 1, 20);
 
     // Activity Profile buttons
     document.querySelectorAll('.profile-btn').forEach(btn => {

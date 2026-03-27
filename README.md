@@ -10,6 +10,7 @@ Perfect for testing fitness apps (Strava, Nike Run Club, etc.), location-based g
 - **Click-to-Route**: Click waypoints on the map. Routes auto-snap to real roads and footpaths via [OSRM](http://project-osrm.org/) foot routing.
 - **GPX Import**: Import `.gpx` tracks (supports `trkpt`, `rtept`, `wpt`). Follows your exact path with embedded or API-fetched elevation.
 - **🎲 Random Run**: Click any point on the map and generate a spontaneous, closed-loop running route around it. Adjust the radius (200–2000m) and target distance (1–10km). Each generation is unique — perfect for simulating impromptu runs.
+- **🔍 Search Routes**: Discover real community-mapped hiking, running, and cycling routes from [OpenStreetMap](https://www.openstreetmap.org/) near any location. Browse results, preview on map, and load with one click.
 
 ### 🏃 Realistic Movement Engine
 - **Natural Speed**: Pace drift (±5–10%), stride micro-fluctuations, warm-up/cool-down phases.
@@ -75,6 +76,14 @@ npm install
 4. Click **Generate Route** — a closed-loop route is created on real roads.
 5. Click **Generate Route** again for a different random route at the same center.
 6. Use the standard Start/Pause/Stop controls to simulate.
+
+### 🔍 Search Routes
+1. Click the **Search** button in the mode bar.
+2. Set the **Search Radius** (1–20 km).
+3. Click on the map — the app searches [OpenStreetMap](https://www.openstreetmap.org/) for community-mapped hiking, running, and cycling routes nearby.
+4. Browse the results list — each card shows the route name, type badge, distance, and proximity.
+5. Hover a route card to preview it on the map.
+6. Click **Use Route** to load it into the simulator.
 
 ### Advanced Settings
 Expand **Advanced Settings** to fine-tune:

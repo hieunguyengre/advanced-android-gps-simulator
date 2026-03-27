@@ -129,6 +129,122 @@ function generateRandomLoopWaypoints(centerLat, centerLng, radiusMeters, targetD
   return waypoints;
 }
 
+// --- Search Routes API (Overpass / OpenStreetMap) ---
+app.get('/api/search-routes', async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  const radius = parseInt(req.query.radius) || 5000; // meters
+
+  if (isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ error: 'Missing or invalid lat/lng' });
+  }
+
+  try {
+    // Overpass QL query: find route relations near the point
+    const query = `
+      [out:json][timeout:30];
+      (
+        relation["type"="route"]["route"~"foot|hiking|running|bicycle"](around:${radius},${lat},${lng});
+      );
+      out geom;
+    `;
+
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`
+    });
+
+    if (!response.ok) {
+      throw new Error(`Overpass API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    const routes = parseOverpassRoutes(data.elements || [], lat, lng);
+
+    res.json({ routes, total: routes.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Parse Overpass API response into structured route objects.
+ */
+function parseOverpassRoutes(elements, centerLat, centerLng) {
+  const routes = [];
+
+  for (const el of elements) {
+    if (el.type !== 'relation') continue;
+
+    const tags = el.tags || {};
+    const name = tags.name || tags['name:en'] || tags.ref || 'Unnamed Route';
+    const routeType = tags.route || 'foot';
+
+    // Extract geometry from relation members
+    const geometry = [];
+    if (el.members) {
+      for (const member of el.members) {
+        if (member.type === 'way' && member.geometry) {
+          for (const point of member.geometry) {
+            geometry.push({ lat: point.lat, lng: point.lon });
+          }
+        }
+      }
+    }
+
+    if (geometry.length < 2) continue; // Skip routes with no usable geometry
+
+    // Calculate total distance
+    let totalDistance = 0;
+    for (let i = 0; i < geometry.length - 1; i++) {
+      totalDistance += haversineDistance(
+        geometry[i].lat, geometry[i].lng,
+        geometry[i + 1].lat, geometry[i + 1].lng
+      );
+    }
+
+    // Use tagged distance if available, otherwise calculated
+    const taggedDistKm = tags.distance ? parseFloat(tags.distance) : null;
+    const distanceKm = taggedDistKm || (totalDistance / 1000);
+
+    // Calculate distance from search center to route start
+    const distFromCenter = haversineDistance(centerLat, centerLng, geometry[0].lat, geometry[0].lng);
+
+    routes.push({
+      id: el.id,
+      name: name,
+      type: routeType,
+      distance: Math.round(distanceKm * 100) / 100, // km, 2 decimals
+      distFromCenter: Math.round(distFromCenter), // meters
+      points: geometry.length,
+      geometry: geometry,
+      tags: {
+        surface: tags.surface,
+        network: tags.network,
+        operator: tags.operator,
+        description: tags.description,
+        website: tags.website
+      }
+    });
+  }
+
+  // Sort by distance from center
+  routes.sort((a, b) => a.distFromCenter - b.distFromCenter);
+
+  return routes;
+}
+
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // --- Telnet Connection Manager ---
 class EmulatorConnection {
   constructor() {
