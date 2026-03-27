@@ -42,6 +42,93 @@ app.get('/api/elevation', async (req, res) => {
   }
 });
 
+// --- Random Route Generation API ---
+app.get('/api/random-route', async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  const radius = parseInt(req.query.radius) || 500;        // meters
+  const targetDistance = parseFloat(req.query.distance) || 3; // km
+
+  if (isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ error: 'Missing or invalid lat/lng' });
+  }
+
+  try {
+    // Generate random waypoints forming a closed loop
+    const waypoints = generateRandomLoopWaypoints(lat, lng, radius, targetDistance);
+
+    // Build OSRM coordinate string (lng,lat format)
+    const coords = waypoints.map(w => `${w.lng},${w.lat}`).join(';');
+    const url = `https://router.project-osrm.org/route/v1/foot/${coords}?overview=full&geometries=geojson&steps=false&alternatives=false`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.code !== 'Ok' || !data.routes || !data.routes.length) {
+      // If OSRM fails, try with fewer waypoints
+      const simpleWaypoints = [waypoints[0], waypoints[Math.floor(waypoints.length / 3)], waypoints[Math.floor(waypoints.length * 2 / 3)], waypoints[waypoints.length - 1]];
+      const simpleCoords = simpleWaypoints.map(w => `${w.lng},${w.lat}`).join(';');
+      const retryUrl = `https://router.project-osrm.org/route/v1/foot/${simpleCoords}?overview=full&geometries=geojson&steps=false&alternatives=false`;
+      const retryResp = await fetch(retryUrl);
+      const retryData = await retryResp.json();
+      return res.json(retryData);
+    }
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Generate waypoints for a closed-loop running route.
+ * Creates an organic loop shape: start → outward → loop around → return to start.
+ */
+function generateRandomLoopWaypoints(centerLat, centerLng, radiusMeters, targetDistanceKm) {
+  // Number of intermediate waypoints scales with target distance
+  const numPoints = Math.min(8, Math.max(4, Math.round(targetDistanceKm * 1.5)));
+
+  // Convert radius to approximate degrees
+  const latPerMeter = 1 / 111320;
+  const lngPerMeter = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
+
+  const waypoints = [];
+
+  // Start point
+  waypoints.push({ lat: centerLat, lng: centerLng });
+
+  // Generate intermediate points around the center at varying distances
+  // Use a strategy to create a natural-looking loop shape
+  const angleOffset = Math.random() * Math.PI * 2; // Random starting direction
+
+  for (let i = 0; i < numPoints; i++) {
+    const fraction = i / numPoints;
+    const angle = angleOffset + fraction * Math.PI * 2;
+
+    // Vary the radius for organic shape: 40-100% of max radius
+    // Create a "petal" or "blob" shape with some randomness
+    const radiusVariation = 0.4 + Math.random() * 0.6;
+    const pointRadius = radiusMeters * radiusVariation;
+
+    // Add slight angle perturbation for naturalness
+    const anglePerturbation = (Math.random() - 0.5) * (Math.PI / numPoints);
+    const finalAngle = angle + anglePerturbation;
+
+    const dLat = pointRadius * Math.cos(finalAngle) * latPerMeter;
+    const dLng = pointRadius * Math.sin(finalAngle) * lngPerMeter;
+
+    waypoints.push({
+      lat: centerLat + dLat,
+      lng: centerLng + dLng
+    });
+  }
+
+  // Close the loop — return to start
+  waypoints.push({ lat: centerLat, lng: centerLng });
+
+  return waypoints;
+}
+
 // --- Telnet Connection Manager ---
 class EmulatorConnection {
   constructor() {
@@ -789,7 +876,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { console.log('Client disconnected'); });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🛰️  GPS Simulator running at http://localhost:${PORT}`);
 });

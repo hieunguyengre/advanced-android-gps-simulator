@@ -124,8 +124,47 @@
           </svg>
           GPX
         </button>
+        <button class="mode-btn" id="modeRandom">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="1" y="1" width="22" height="22" rx="4"/>
+            <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+            <circle cx="16" cy="8" r="1.5" fill="currentColor"/>
+            <circle cx="8" cy="16" r="1.5" fill="currentColor"/>
+            <circle cx="16" cy="16" r="1.5" fill="currentColor"/>
+            <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+          </svg>
+          Random
+        </button>
       </div>
       <input type="file" id="gpxFileInput" accept=".gpx,.xml" class="hidden">
+
+      <!-- Random Run Controls -->
+      <div id="randomRunControls" class="route-controls hidden">
+        <div class="random-run-info">
+          <span class="random-run-icon">🎲</span>
+          <span>Click on the map to set center point</span>
+        </div>
+        <div class="speed-control">
+          <label>Radius: <strong id="randomRadiusValue">500</strong> m</label>
+          <input type="range" id="randomRadiusSlider" min="200" max="2000" value="500" step="50" class="slider">
+          <div class="speed-hint">Area around center to generate route</div>
+        </div>
+        <div class="speed-control">
+          <label>Target Distance: <strong id="randomDistanceValue">3</strong> km</label>
+          <input type="range" id="randomDistanceSlider" min="1" max="10" value="3" step="0.5" class="slider">
+          <div class="speed-hint">Approximate total route length</div>
+        </div>
+        <div class="route-buttons">
+          <button class="btn btn-accent" id="generateRandomBtn" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+            Generate Route
+          </button>
+          <button class="btn btn-ghost" id="clearRandomBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Clear
+          </button>
+        </div>
+      </div>
 
       <div id="routeControls" class="route-controls hidden">
         <!-- Activity Profile Selector -->

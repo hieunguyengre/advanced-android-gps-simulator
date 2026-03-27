@@ -17,6 +17,9 @@
   let isRouteRunning = false;
   let isRoutePaused = false;
   let currentProfile = 'custom';
+  let randomCenter = null;
+  let randomRadiusCircle = null;
+  let randomCenterMarker = null;
 
   // ===== Activity Profile Presets =====
   const PROFILES = {
@@ -96,6 +99,15 @@
   const pauseDisplay = $('pauseDisplay');
   const pauseUnit = $('pauseUnit');
 
+  // Random run controls
+  const randomRunControls = $('randomRunControls');
+  const randomRadiusSlider = $('randomRadiusSlider');
+  const randomRadiusValue = $('randomRadiusValue');
+  const randomDistanceSlider = $('randomDistanceSlider');
+  const randomDistanceValue = $('randomDistanceValue');
+  const generateRandomBtn = $('generateRandomBtn');
+  const clearRandomBtn = $('clearRandomBtn');
+
   // Advanced settings refs
   const advancedToggle = $('advancedToggle');
   const advancedBody = $('advancedBody');
@@ -139,7 +151,125 @@
       updateCoords(lat, lng);
     } else if (mode === 'route') {
       addWaypoint(lat, lng);
+    } else if (mode === 'random') {
+      setRandomCenter(lat, lng);
     }
+  }
+
+  // --- Random Run ---
+  function setRandomCenter(lat, lng) {
+    randomCenter = { lat, lng };
+
+    // Draw/update center marker
+    if (randomCenterMarker) {
+      randomCenterMarker.setLatLng([lat, lng]);
+    } else {
+      randomCenterMarker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: 'random-center-marker',
+          html: '<div class="random-center-pulse"></div><div class="random-center-dot">🎯</div>',
+          iconSize: [32, 32], iconAnchor: [16, 16]
+        }),
+        zIndexOffset: 900
+      }).addTo(map);
+    }
+
+    // Draw/update radius circle
+    const radius = parseInt(randomRadiusSlider.value);
+    if (randomRadiusCircle) {
+      randomRadiusCircle.setLatLng([lat, lng]);
+      randomRadiusCircle.setRadius(radius);
+    } else {
+      randomRadiusCircle = L.circle([lat, lng], {
+        radius: radius,
+        color: '#a78bfa',
+        fillColor: '#a78bfa',
+        fillOpacity: 0.08,
+        weight: 2,
+        dashArray: '8, 6'
+      }).addTo(map);
+    }
+
+    generateRandomBtn.disabled = false;
+    showToast(`Center set: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, 'info');
+  }
+
+  async function generateRandomRoute() {
+    if (!randomCenter) {
+      showToast('Click on the map to set a center point first', 'error');
+      return;
+    }
+
+    const radius = parseInt(randomRadiusSlider.value);
+    const distance = parseFloat(randomDistanceSlider.value);
+
+    showLoading('Generating random route...');
+
+    try {
+      const resp = await fetch(
+        `/api/random-route?lat=${randomCenter.lat}&lng=${randomCenter.lng}&radius=${radius}&distance=${distance}`
+      );
+      const data = await resp.json();
+
+      if (data.code !== 'Ok' || !data.routes || !data.routes.length) {
+        showToast('Could not generate route. Try a different location or larger radius.', 'error');
+        hideLoading();
+        return;
+      }
+
+      const route = data.routes[0];
+      const geojsonCoords = route.geometry.coordinates;
+      routePoints = geojsonCoords.map(c => ({ lat: c[1], lng: c[0] }));
+
+      // Clear existing waypoints
+      waypoints = [routePoints[0], routePoints[routePoints.length - 1]];
+      waypointMarkers.forEach(m => map.removeLayer(m));
+      waypointMarkers = [];
+
+      // Draw route
+      const latlngs = routePoints.map(p => [p.lat, p.lng]);
+      if (routePolyline) { routePolyline.setLatLngs(latlngs); }
+      else {
+        routePolyline = L.polyline(latlngs, {
+          color: '#a78bfa', weight: 4, opacity: 0.85,
+          smoothFactor: 1, lineCap: 'round', lineJoin: 'round'
+        }).addTo(map);
+      }
+
+      // Add start marker
+      const startMarker = L.circleMarker([routePoints[0].lat, routePoints[0].lng], {
+        radius: 8, color: '#fff', fillColor: '#34d399', fillOpacity: 1, weight: 2
+      }).addTo(map).bindPopup('<b>Start / Finish</b>');
+      waypointMarkers.push(startMarker);
+
+      const distKm = (route.distance / 1000).toFixed(2);
+      routeDistance.textContent = `(${distKm} km)`;
+      showToast(`Random route: ${distKm} km loop generated! 🎲`, 'success');
+
+      // Fetch elevation
+      await fetchElevations();
+
+      // Fit map to route
+      map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
+
+      // Show route controls for Start/Pause/Stop
+      routeControls.classList.remove('hidden');
+
+    } catch (err) {
+      showToast('Route generation error: ' + err.message, 'error');
+    }
+
+    hideLoading();
+    updateRouteUI();
+  }
+
+  function clearRandomRun() {
+    randomCenter = null;
+    if (randomCenterMarker) { map.removeLayer(randomCenterMarker); randomCenterMarker = null; }
+    if (randomRadiusCircle) { map.removeLayer(randomRadiusCircle); randomRadiusCircle = null; }
+    generateRandomBtn.disabled = true;
+    clearRoute();
+    routeControls.classList.add('hidden');
   }
 
   function createMarkerIcon() {
@@ -634,20 +764,26 @@
       }
     });
 
-    modeClick.addEventListener('click', () => {
-      mode = 'click';
-      modeClick.classList.add('active');
+    function deactivateAllModes() {
+      modeClick.classList.remove('active');
       modeRoute.classList.remove('active');
       $('modeImport').classList.remove('active');
+      $('modeRandom').classList.remove('active');
       routeControls.classList.add('hidden');
+      randomRunControls.classList.add('hidden');
       map.getContainer().style.cursor = '';
+    }
+
+    modeClick.addEventListener('click', () => {
+      deactivateAllModes();
+      mode = 'click';
+      modeClick.classList.add('active');
     });
 
     modeRoute.addEventListener('click', () => {
+      deactivateAllModes();
       mode = 'route';
       modeRoute.classList.add('active');
-      modeClick.classList.remove('active');
-      $('modeImport').classList.remove('active');
       routeControls.classList.remove('hidden');
       map.getContainer().style.cursor = 'crosshair';
     });
@@ -660,9 +796,37 @@
     gpxFileInput.addEventListener('change', (e) => {
       if (e.target.files.length > 0) {
         importGPXFile(e.target.files[0]);
-        e.target.value = ''; // allow re-importing same file
+        e.target.value = '';
       }
     });
+
+    // Random Run mode
+    $('modeRandom').addEventListener('click', () => {
+      deactivateAllModes();
+      mode = 'random';
+      $('modeRandom').classList.add('active');
+      randomRunControls.classList.remove('hidden');
+      map.getContainer().style.cursor = 'crosshair';
+    });
+
+    // Random run controls
+    randomRadiusSlider.addEventListener('input', () => {
+      randomRadiusValue.textContent = randomRadiusSlider.value;
+      updateSliderBg(randomRadiusSlider, 200, 2000);
+      if (randomRadiusCircle && randomCenter) {
+        randomRadiusCircle.setRadius(parseInt(randomRadiusSlider.value));
+      }
+    });
+    updateSliderBg(randomRadiusSlider, 200, 2000);
+
+    randomDistanceSlider.addEventListener('input', () => {
+      randomDistanceValue.textContent = randomDistanceSlider.value;
+      updateSliderBg(randomDistanceSlider, 1, 10);
+    });
+    updateSliderBg(randomDistanceSlider, 1, 10);
+
+    generateRandomBtn.addEventListener('click', () => generateRandomRoute());
+    clearRandomBtn.addEventListener('click', () => clearRandomRun());
 
     // Activity Profile buttons
     document.querySelectorAll('.profile-btn').forEach(btn => {
