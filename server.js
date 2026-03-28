@@ -506,8 +506,8 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLng / 2) ** 2;
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -879,6 +879,14 @@ class RouteSimulator {
     // Estimated total duration
     this.estimatedDuration = 0;
 
+    // Timing
+    this.elapsedMs = 0;
+    this.startTime = null;
+    this.speedMultiplier = 1;
+
+    // GPX track recording (for export)
+    this.recordedTrack = [];
+
     // Auto-pause state
     this.autoPauseEnabled = true;
     this.isAutoPaused = false;
@@ -913,6 +921,10 @@ class RouteSimulator {
     this.isAutoPaused = false;
     this.autoPauseRemaining = 0;
     this.lastRestDistance = 0;
+    this.elapsedMs = 0;
+    this.startTime = Date.now();
+    this.recordedTrack = [];
+    this.speedMultiplier = options.speedMultiplier || 1;
 
     this.loopMode = options.loop || false;
     this.totalLaps = options.laps || 1;
@@ -954,7 +966,8 @@ class RouteSimulator {
     const updateInterval = 100;
     this.intervalId = setInterval(() => {
       if (this.paused || !this.running) return;
-      this._step(updateInterval);
+      this._step(updateInterval * this.speedMultiplier);
+      this.elapsedMs += updateInterval * this.speedMultiplier;
     }, updateInterval);
   }
 
@@ -1070,8 +1083,8 @@ class RouteSimulator {
       //    Only trigger if we haven't already paused at this segment
       const upcomingAngle = this.turnAngles[this.currentIndex + 1] || 0;
       if (upcomingAngle > 60 && this.progress > 0.8
-          && this.currentIndex !== this.lastPausedAtIndex
-          && Math.random() < this.adv.intersectionChance) {
+        && this.currentIndex !== this.lastPausedAtIndex
+        && Math.random() < this.adv.intersectionChance) {
         this.lastPausedAtIndex = this.currentIndex;
         const pauseDuration = this.adv.intersectionDurMin + Math.random() * (this.adv.intersectionDurMax - this.adv.intersectionDurMin);
         this._triggerAutoPause(pauseDuration, 'intersection');
@@ -1151,7 +1164,22 @@ class RouteSimulator {
   }
 
   _updateLocation(currentSpeed, gradient, isPaused) {
-    this.connection.setLocation(this.currentLat, this.currentLng, Math.round(this.currentAlt)).catch(() => {});
+    this.connection.setLocation(this.currentLat, this.currentLng, Math.round(this.currentAlt)).catch(() => { });
+
+    // Record track point for GPX export (every ~1s of simulated time)
+    if (this.recordedTrack.length === 0 || this.elapsedMs - (this.recordedTrack[this.recordedTrack.length - 1]._ms || 0) >= 1000) {
+      this.recordedTrack.push({
+        lat: this.currentLat,
+        lng: this.currentLng,
+        alt: Math.round(this.currentAlt),
+        time: new Date(this.startTime + this.elapsedMs).toISOString(),
+        _ms: this.elapsedMs
+      });
+    }
+
+    const totalDist = this.totalDistance * (this.loopMode ? this.totalLaps : 1);
+    const progressPct = totalDist > 0 ? Math.min(100, (this.coveredDistance / totalDist) * 100) : 0;
+
     this.broadcast({
       type: 'position-update',
       lat: this.currentLat,
@@ -1162,7 +1190,10 @@ class RouteSimulator {
       lap: this.currentLap + 1,
       totalLaps: this.totalLaps,
       distance: Math.round(this.coveredDistance),
-      totalDistance: Math.round(this.totalDistance * (this.loopMode ? this.totalLaps : 1)),
+      totalDistance: Math.round(totalDist),
+      progressPct: Math.round(progressPct * 10) / 10,
+      elapsedMs: this.elapsedMs,
+      speedMultiplier: this.speedMultiplier,
       pointIndex: this.currentIndex,
       totalPoints: this.routePoints.length,
       isAutoPaused: isPaused,
@@ -1176,13 +1207,19 @@ class RouteSimulator {
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLng = (lng2 - lng1) * Math.PI / 180;
     const a = Math.sin(dLat / 2) ** 2 +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng / 2) ** 2;
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   setSpeed(speedKmh) {
     if (this.speedEngine) this.speedEngine.setBaseSpeed(speedKmh);
+  }
+  setSpeedMultiplier(mult) {
+    this.speedMultiplier = Math.max(1, Math.min(20, mult));
+  }
+  getRecordedTrack() {
+    return this.recordedTrack;
   }
   pause() { this.paused = true; }
   resume() { this.paused = false; }
@@ -1205,6 +1242,35 @@ class RouteSimulator {
       pauseReason: this.autoPauseReason
     };
   }
+}
+
+// ====================================================================
+// GPX EXPORT
+// ====================================================================
+function generateGPXFromTrack(track) {
+  const now = new Date().toISOString();
+  let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="GPS Simulator" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Simulated Route</name>
+    <desc>Generated by Advanced Android GPS Simulator</desc>
+    <time>${now}</time>
+  </metadata>
+  <trk>
+    <name>Simulated Activity</name>
+    <trkseg>\n`;
+
+  for (const pt of track) {
+    gpx += `      <trkpt lat="${pt.lat.toFixed(7)}" lon="${pt.lng.toFixed(7)}">
+        <ele>${pt.alt}</ele>
+        <time>${pt.time}</time>
+      </trkpt>\n`;
+  }
+
+  gpx += `    </trkseg>
+  </trk>
+</gpx>`;
+  return gpx;
 }
 
 // ====================================================================
@@ -1278,6 +1344,20 @@ wss.on('connection', (ws) => {
         }
         case 'set-speed': {
           if (simulator) simulator.setSpeed(msg.speed);
+          break;
+        }
+        case 'set-speed-multiplier': {
+          if (simulator) simulator.setSpeedMultiplier(msg.multiplier || 1);
+          break;
+        }
+        case 'export-gpx': {
+          const track = simulator ? simulator.getRecordedTrack() : [];
+          if (track.length < 2) {
+            ws.send(JSON.stringify({ type: 'export-gpx-result', error: 'No track recorded yet' }));
+          } else {
+            const gpxXml = generateGPXFromTrack(track);
+            ws.send(JSON.stringify({ type: 'export-gpx-result', gpx: gpxXml, points: track.length }));
+          }
           break;
         }
         case 'get-status': {

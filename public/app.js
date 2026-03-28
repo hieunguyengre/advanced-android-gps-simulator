@@ -113,6 +113,18 @@
   const pauseCard = $('pauseCard');
   const pauseDisplay = $('pauseDisplay');
   const pauseUnit = $('pauseUnit');
+  const paceDisplay = $('paceDisplay');
+  const elapsedDisplay = $('elapsedDisplay');
+  const elapsedUnit = $('elapsedUnit');
+  const progressContainer = $('progressContainer');
+  const progressFill = $('progressFill');
+  const progressText = $('progressText');
+  const speedMultRow = $('speedMultRow');
+  const exportRow = $('exportRow');
+  const exportGpxBtn = $('exportGpxBtn');
+  const saveConfigBtn = $('saveConfigBtn');
+  const loadConfigSelect = $('loadConfigSelect');
+  const deleteConfigBtn = $('deleteConfigBtn');
 
   // Random run controls
   const randomRunControls = $('randomRunControls');
@@ -885,6 +897,36 @@
             distanceUnit.textContent = 'm';
           }
 
+          // Pace (min:sec / km)
+          if (msg.speed > 0.5) {
+            const paceMinPerKm = 60 / msg.speed;
+            const paceMin = Math.floor(paceMinPerKm);
+            const paceSec = Math.round((paceMinPerKm - paceMin) * 60);
+            paceDisplay.textContent = `${paceMin}:${String(paceSec).padStart(2, '0')}`;
+          } else {
+            paceDisplay.textContent = '—';
+          }
+
+          // Elapsed time
+          if (msg.elapsedMs !== undefined) {
+            const totalSec = Math.floor(msg.elapsedMs / 1000);
+            const hrs = Math.floor(totalSec / 3600);
+            const mins = Math.floor((totalSec % 3600) / 60);
+            const secs = totalSec % 60;
+            if (hrs > 0) {
+              elapsedDisplay.textContent = `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            } else {
+              elapsedDisplay.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
+            }
+          }
+
+          // Progress bar
+          if (msg.progressPct !== undefined) {
+            progressContainer.style.display = 'flex';
+            progressFill.style.width = msg.progressPct + '%';
+            progressText.textContent = msg.progressPct.toFixed(1) + '%';
+          }
+
           if (msg.totalLaps > 1) {
             lapCard.style.display = 'flex';
             lapDisplay.textContent = `${msg.lap}/${msg.totalLaps}`;
@@ -918,6 +960,8 @@
       case 'route-started':
         isRouteRunning = true; isRoutePaused = false;
         updateRouteButtons();
+        speedMultRow.style.display = 'flex';
+        exportRow.style.display = 'block';
         showToast('Route simulation started 🏃', 'info');
         break;
       case 'route-paused':
@@ -929,12 +973,32 @@
       case 'route-stopped':
         isRouteRunning = false; isRoutePaused = false;
         updateRouteButtons();
+        speedMultRow.style.display = 'none';
+        progressContainer.style.display = 'none';
         showToast('Route simulation stopped', 'info');
         break;
       case 'route-complete':
         isRouteRunning = false; isRoutePaused = false;
         updateRouteButtons();
+        speedMultRow.style.display = 'none';
+        progressFill.style.width = '100%';
+        progressText.textContent = '100%';
         showToast(`Route completed${msg.laps > 1 ? ` (${msg.laps} laps)` : ''}! 🎉`, 'success');
+        break;
+      case 'export-gpx-result':
+        if (msg.error) {
+          showToast('Export error: ' + msg.error, 'error');
+        } else {
+          // Download GPX file
+          const blob = new Blob([msg.gpx], { type: 'application/gpx+xml' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `simulated_route_${new Date().toISOString().slice(0,10)}.gpx`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast(`GPX exported (${msg.points} points)`, 'success');
+        }
         break;
       case 'error':
         showToast(msg.message, 'error');
@@ -1149,6 +1213,23 @@
     clearRouteBtn.addEventListener('click', () => {
       if (isRouteRunning) sendWS({ type: 'stop-route' });
       clearRoute();
+      speedMultRow.style.display = 'none';
+      exportRow.style.display = 'none';
+      progressContainer.style.display = 'none';
+    });
+
+    // Speed multiplier buttons
+    document.querySelectorAll('.speed-mult-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.speed-mult-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        sendWS({ type: 'set-speed-multiplier', multiplier: parseInt(btn.dataset.mult) });
+      });
+    });
+
+    // Export GPX
+    exportGpxBtn.addEventListener('click', () => {
+      sendWS({ type: 'export-gpx' });
     });
 
     $('toggleConnection').addEventListener('click', () => {
@@ -1189,9 +1270,167 @@
     bindDual(restDurMin, restDurMax, restDurVal, 's');
     updateSliderBg(speedSlider, 1, 60);
     updateSliderBg(jitterSlider, 1, 50);
+
+    // Save/Load config
+    saveConfigBtn.addEventListener('click', saveConfig);
+    loadConfigSelect.addEventListener('change', () => {
+      if (loadConfigSelect.value) loadConfig(loadConfigSelect.value);
+    });
+    deleteConfigBtn.addEventListener('click', deleteSelectedConfig);
   }
 
-  function init() { initMap(); bindEvents(); connectWS(); }
+  // ===== Save/Load Configuration =====
+  const STORAGE_KEY = 'gps_sim_configs';
+
+  function getSavedConfigs() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    } catch { return {}; }
+  }
+
+  function refreshSavedList() {
+    const configs = getSavedConfigs();
+    loadConfigSelect.innerHTML = '<option value="">Load saved...</option>';
+    Object.keys(configs).sort().forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      const cfg = configs[name];
+      const distLabel = cfg.routeDistance ? ` (${cfg.routeDistance})` : '';
+      opt.textContent = name + distLabel;
+      loadConfigSelect.appendChild(opt);
+    });
+  }
+
+  function saveConfig() {
+    const name = prompt('Configuration name:', `Route ${new Date().toLocaleString()}`);
+    if (!name) return;
+
+    const config = {
+      routePoints,
+      elevations,
+      routeDistance: routeDistance.textContent,
+      speed: speedSlider.value,
+      jitter: jitterToggle.checked,
+      gpsQuality: gpsQualitySelect.value,
+      jitterIntensity: jitterSlider.value,
+      loop: loopToggle.checked,
+      laps: lapCount.value,
+      autoPause: autoPauseToggle.checked,
+      profile: currentProfile,
+      advanced: {
+        paceVar: paceVarSlider.value,
+        turnSlow: turnSlowSlider.value,
+        gradientEff: gradientEffSlider.value,
+        warmup: warmupSlider.value,
+        cooldown: cooldownSlider.value,
+        intChance: intChanceSlider.value,
+        intDurMin: intDurMin.value,
+        intDurMax: intDurMax.value,
+        restIntMin: restIntMin.value,
+        restIntMax: restIntMax.value,
+        restDurMin: restDurMin.value,
+        restDurMax: restDurMax.value
+      },
+      savedAt: new Date().toISOString()
+    };
+
+    const configs = getSavedConfigs();
+    configs[name] = config;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+    refreshSavedList();
+    showToast(`Configuration "${name}" saved 💾`, 'success');
+  }
+
+  function loadConfig(name) {
+    const configs = getSavedConfigs();
+    const cfg = configs[name];
+    if (!cfg) return;
+
+    // Clear existing route
+    clearRoute();
+
+    // Restore route
+    if (cfg.routePoints && cfg.routePoints.length >= 2) {
+      routePoints = cfg.routePoints;
+      elevations = cfg.elevations || [];
+      waypoints = [routePoints[0], routePoints[routePoints.length - 1]];
+
+      // Draw on map
+      const latlngs = routePoints.map(p => [p.lat, p.lng]);
+      if (routePolyline) { routePolyline.setLatLngs(latlngs); }
+      else {
+        routePolyline = L.polyline(latlngs, {
+          color: '#a78bfa', weight: 4, opacity: 0.85,
+          smoothFactor: 1, lineCap: 'round', lineJoin: 'round'
+        }).addTo(map);
+      }
+
+      const startMarker = L.circleMarker([routePoints[0].lat, routePoints[0].lng], {
+        radius: 8, color: '#fff', fillColor: '#34d399', fillOpacity: 1, weight: 2
+      }).addTo(map).bindPopup('<b>Start</b>');
+      waypointMarkers.push(startMarker);
+
+      if (cfg.routeDistance) routeDistance.textContent = cfg.routeDistance;
+      map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
+    }
+
+    // Restore settings
+    speedSlider.value = cfg.speed || 10;
+    speedValue.textContent = speedSlider.value;
+    updateSliderBg(speedSlider, 1, 60);
+
+    jitterToggle.checked = cfg.jitter !== false;
+    gpsQualitySelect.value = cfg.gpsQuality || 'standard';
+    gpsQualityContainer.style.opacity = jitterToggle.checked ? '1' : '0.3';
+    if (cfg.gpsQuality === 'custom') {
+      gpsCustomIntensity.classList.remove('hidden');
+      jitterSlider.value = cfg.jitterIntensity || 10;
+      updateSliderBg(jitterSlider, 1, 50);
+    } else {
+      gpsCustomIntensity.classList.add('hidden');
+    }
+
+    loopToggle.checked = cfg.loop || false;
+    loopLapsContainer.classList.toggle('hidden', !cfg.loop);
+    lapCount.value = cfg.laps || 3;
+    autoPauseToggle.checked = cfg.autoPause !== false;
+
+    // Restore advanced settings
+    if (cfg.advanced) {
+      const a = cfg.advanced;
+      paceVarSlider.value = a.paceVar; paceVarVal.textContent = a.paceVar + '%'; updateSliderBg(paceVarSlider, 0, 200);
+      turnSlowSlider.value = a.turnSlow; turnSlowVal.textContent = a.turnSlow + '%'; updateSliderBg(turnSlowSlider, 0, 60);
+      gradientEffSlider.value = a.gradientEff; gradientEffVal.textContent = a.gradientEff + '%'; updateSliderBg(gradientEffSlider, 0, 200);
+      warmupSlider.value = a.warmup; warmupVal.textContent = a.warmup == 0 ? 'Auto' : a.warmup + 's'; updateSliderBg(warmupSlider, 0, 300);
+      cooldownSlider.value = a.cooldown; cooldownVal.textContent = a.cooldown == 0 ? 'Auto' : a.cooldown + 's'; updateSliderBg(cooldownSlider, 0, 300);
+      intChanceSlider.value = a.intChance; intChanceVal.textContent = a.intChance + '%'; updateSliderBg(intChanceSlider, 0, 100);
+      intDurMin.value = a.intDurMin; intDurMax.value = a.intDurMax; intDurVal.textContent = `${a.intDurMin}-${a.intDurMax}s`;
+      restIntMin.value = a.restIntMin; restIntMax.value = a.restIntMax; restIntVal.textContent = `${a.restIntMin}-${a.restIntMax} km`;
+      restDurMin.value = a.restDurMin; restDurMax.value = a.restDurMax; restDurVal.textContent = `${a.restDurMin}-${a.restDurMax}s`;
+    }
+
+    // Restore profile highlight
+    if (cfg.profile) applyProfile(cfg.profile);
+
+    routeControls.classList.remove('hidden');
+    updateRouteUI();
+    showToast(`Loaded "${name}" ✅`, 'success');
+    loadConfigSelect.value = '';
+  }
+
+  function deleteSelectedConfig() {
+    const name = loadConfigSelect.value;
+    if (!name) { showToast('Select a saved config to delete', 'error'); return; }
+    if (!confirm(`Delete "${name}"?`)) return;
+
+    const configs = getSavedConfigs();
+    delete configs[name];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+    refreshSavedList();
+    showToast(`Deleted "${name}"`, 'info');
+  }
+
+  function init() { initMap(); bindEvents(); connectWS(); refreshSavedList(); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

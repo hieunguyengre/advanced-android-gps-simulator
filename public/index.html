@@ -68,6 +68,11 @@
           <span class="stat-unit">km/h</span>
         </div>
         <div class="stat-card">
+          <span class="stat-icon">⏱️</span>
+          <span class="stat-value" id="paceDisplay">—</span>
+          <span class="stat-unit">/km</span>
+        </div>
+        <div class="stat-card">
           <span class="stat-icon">⛰️</span>
           <span class="stat-value" id="altitudeDisplay">—</span>
           <span class="stat-unit">m</span>
@@ -82,6 +87,11 @@
           <span class="stat-value" id="gradientDisplay">—</span>
           <span class="stat-unit">%</span>
         </div>
+        <div class="stat-card">
+          <span class="stat-icon">⏳</span>
+          <span class="stat-value" id="elapsedDisplay">—</span>
+          <span class="stat-unit" id="elapsedUnit"></span>
+        </div>
         <div class="stat-card" id="lapCard" style="display:none;">
           <span class="stat-icon">🔄</span>
           <span class="stat-value" id="lapDisplay">—</span>
@@ -92,6 +102,12 @@
           <span class="stat-value" id="pauseDisplay">—</span>
           <span class="stat-unit" id="pauseUnit">s</span>
         </div>
+      </div>
+      <div class="progress-container" id="progressContainer" style="display:none;">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill" style="width:0%"></div>
+        </div>
+        <span class="progress-text" id="progressText">0%</span>
       </div>
     </div>
   </div>
@@ -207,6 +223,17 @@
         <div class="waypoint-count">
           <span id="waypointCount">0</span> waypoints
           <span class="route-distance" id="routeDistance"></span>
+        </div>
+
+        <div class="save-load-row">
+          <button class="btn btn-save-config" id="saveConfigBtn" title="Save current route & settings">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save
+          </button>
+          <select class="select-sm select-load" id="loadConfigSelect">
+            <option value="">Load saved...</option>
+          </select>
+          <button class="btn btn-ghost btn-delete-config" id="deleteConfigBtn" title="Delete selected" style="padding:6px 8px;font-size:10px;">✕</button>
         </div>
 
         <div class="speed-control">
@@ -359,6 +386,23 @@
           <button class="btn btn-ghost" id="clearRouteBtn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             Clear
+          </button>
+        </div>
+
+        <div class="speed-mult-row" id="speedMultRow" style="display:none;">
+          <span class="speed-mult-label">Simulation Speed:</span>
+          <div class="speed-mult-buttons">
+            <button class="speed-mult-btn active" data-mult="1">1×</button>
+            <button class="speed-mult-btn" data-mult="2">2×</button>
+            <button class="speed-mult-btn" data-mult="5">5×</button>
+            <button class="speed-mult-btn" data-mult="10">10×</button>
+          </div>
+        </div>
+
+        <div class="export-row" id="exportRow" style="display:none;">
+          <button class="btn btn-export" id="exportGpxBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export GPX
           </button>
         </div>
       </div>
