@@ -48,6 +48,7 @@ app.get('/api/random-route', async (req, res) => {
   const lng = parseFloat(req.query.lng);
   const radius = parseInt(req.query.radius) || 500;        // meters
   const targetDistance = parseFloat(req.query.distance) || 3; // km
+  const shape = req.query.shape || 'random';                 // out-and-back, lollipop, organic, random
 
   if (isNaN(lat) || isNaN(lng)) {
     return res.status(400).json({ error: 'Missing or invalid lat/lng' });
@@ -55,7 +56,7 @@ app.get('/api/random-route', async (req, res) => {
 
   try {
     // Generate random waypoints forming a closed loop
-    const waypoints = generateRandomLoopWaypoints(lat, lng, radius, targetDistance);
+    const waypoints = generateRandomLoopWaypoints(lat, lng, radius, targetDistance, shape);
 
     // Build OSRM coordinate string (lng,lat format)
     const coords = waypoints.map(w => `${w.lng},${w.lat}`).join(';');
@@ -87,23 +88,27 @@ app.get('/api/random-route', async (req, res) => {
  *   2. Figure-8 / Lollipop (run somewhere, loop, come back)
  *   3. Organic irregular shape (Perlin-like noise for non-circular blob)
  */
-function generateRandomLoopWaypoints(centerLat, centerLng, radiusMeters, targetDistanceKm) {
+function generateRandomLoopWaypoints(centerLat, centerLng, radiusMeters, targetDistanceKm, shape = 'random') {
   const latPerMeter = 1 / 111320;
   const lngPerMeter = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
 
-  // Pick a random shape strategy
-  const strategy = Math.random();
-  let waypoints;
+  const args = [centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter];
 
-  if (strategy < 0.35) {
-    waypoints = _generateOutAndBack(centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter);
-  } else if (strategy < 0.6) {
-    waypoints = _generateLollipop(centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter);
-  } else {
-    waypoints = _generateOrganicLoop(centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter);
+  switch (shape) {
+    case 'out-and-back':
+      return _generateOutAndBack(...args);
+    case 'lollipop':
+      return _generateLollipop(...args);
+    case 'organic':
+      return _generateOrganicLoop(...args);
+    default: {
+      // Random: pick one
+      const r = Math.random();
+      if (r < 0.35) return _generateOutAndBack(...args);
+      if (r < 0.6) return _generateLollipop(...args);
+      return _generateOrganicLoop(...args);
+    }
   }
-
-  return waypoints;
 }
 
 /**

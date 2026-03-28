@@ -256,12 +256,13 @@
 
     const radius = parseInt(randomRadiusSlider.value);
     const distance = parseFloat(randomDistanceSlider.value);
+    const shape = $('routeShapeSelect').value;
 
     showLoading('Generating random route...');
 
     try {
       const resp = await fetch(
-        `/api/random-route?lat=${randomCenter.lat}&lng=${randomCenter.lng}&radius=${radius}&distance=${distance}`
+        `/api/random-route?lat=${randomCenter.lat}&lng=${randomCenter.lng}&radius=${radius}&distance=${distance}&shape=${shape}`
       );
       const data = await resp.json();
 
