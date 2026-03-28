@@ -24,12 +24,22 @@
   let searchSelectedRoute = null;
   let searchRadiusCircle = null;
 
+  // ===== GPS Signal Quality Presets (research-based) =====
+  // Real GPS deviation: Premium watch ~0.5m, Standard ~1.5m, Phone ~2-6m
+  const GPS_QUALITY = {
+    premium:    { name: 'Premium Watch',  intensity: 0.3,  urbanMult: 0.3 },
+    standard:   { name: 'Standard Watch', intensity: 1.0,  urbanMult: 0.5 },
+    phone_good: { name: 'Phone - Good',   intensity: 1.5,  urbanMult: 0.8 },
+    phone_urban:{ name: 'Phone - Urban',  intensity: 2.5,  urbanMult: 1.5 },
+    phone_poor: { name: 'Phone - Poor',   intensity: 4.0,  urbanMult: 2.0 }
+  };
+
   // ===== Activity Profile Presets =====
   const PROFILES = {
     custom: { name: 'Custom' },
     walking: {
       name: 'Walking',
-      speed: 5, jitter: true, jitterIntensity: 15, autoPause: true,
+      speed: 5, jitter: true, gpsQuality: 'phone_good', autoPause: true,
       paceVar: 120, turnSlow: 20, gradientEff: 150,
       warmup: 60, cooldown: 60,
       intChance: 50, intDurMin: 15, intDurMax: 60,
@@ -37,7 +47,7 @@
     },
     jogging: {
       name: 'Jogging',
-      speed: 8, jitter: true, jitterIntensity: 10, autoPause: true,
+      speed: 8, jitter: true, gpsQuality: 'standard', autoPause: true,
       paceVar: 100, turnSlow: 35, gradientEff: 120,
       warmup: 120, cooldown: 90,
       intChance: 30, intDurMin: 8, intDurMax: 30,
@@ -45,7 +55,7 @@
     },
     running: {
       name: 'Running',
-      speed: 12, jitter: true, jitterIntensity: 8, autoPause: false,
+      speed: 12, jitter: true, gpsQuality: 'standard', autoPause: false,
       paceVar: 80, turnSlow: 45, gradientEff: 100,
       warmup: 180, cooldown: 120,
       intChance: 15, intDurMin: 5, intDurMax: 20,
@@ -53,7 +63,7 @@
     },
     cycling: {
       name: 'Cycling',
-      speed: 22, jitter: true, jitterIntensity: 6, autoPause: true,
+      speed: 22, jitter: true, gpsQuality: 'premium', autoPause: true,
       paceVar: 70, turnSlow: 50, gradientEff: 150,
       warmup: 0, cooldown: 0,
       intChance: 60, intDurMin: 15, intDurMax: 60,
@@ -87,7 +97,9 @@
   const jitterToggle = $('jitterToggle');
   const jitterSlider = $('jitterSlider');
   const jitterValue = $('jitterValue');
-  const jitterIntensityContainer = $('jitterIntensityContainer');
+  const gpsQualityContainer = $('gpsQualityContainer');
+  const gpsQualitySelect = $('gpsQualitySelect');
+  const gpsCustomIntensity = $('gpsCustomIntensity');
   const loopToggle = $('loopToggle');
   const loopLapsContainer = $('loopLapsContainer');
   const lapCount = $('lapCount');
@@ -143,6 +155,23 @@
   const restDurMin = $('restDurMin');
   const restDurMax = $('restDurMax');
   const restDurVal = $('restDurVal');
+
+  // ===== GPS Quality Helpers =====
+  function getJitterIntensity() {
+    const quality = gpsQualitySelect.value;
+    if (quality === 'custom') {
+      return parseInt(jitterSlider.value) / 10;
+    }
+    return GPS_QUALITY[quality]?.intensity ?? 1.0;
+  }
+
+  function getJitterUrbanMult() {
+    const quality = gpsQualitySelect.value;
+    if (quality === 'custom') {
+      return 0.8; // default urban mult for custom mode
+    }
+    return GPS_QUALITY[quality]?.urbanMult ?? 0.5;
+  }
 
   function initMap() {
     map = L.map('map', { center: [10.8231, 106.6297], zoom: 14, zoomControl: true });
@@ -767,10 +796,11 @@
     updateSliderBg(speedSlider, 1, 60);
 
     jitterToggle.checked = p.jitter;
-    jitterSlider.value = p.jitterIntensity;
-    jitterValue.textContent = (p.jitterIntensity / 10).toFixed(1) + '×';
-    updateSliderBg(jitterSlider, 1, 30);
-    jitterIntensityContainer.style.opacity = p.jitter ? '1' : '0.3';
+    if (p.gpsQuality) {
+      gpsQualitySelect.value = p.gpsQuality;
+      gpsCustomIntensity.classList.add('hidden');
+    }
+    gpsQualityContainer.style.opacity = p.jitter ? '1' : '0.3';
 
     autoPauseToggle.checked = p.autoPause;
 
@@ -1060,13 +1090,23 @@
     });
 
     jitterToggle.addEventListener('change', () => {
-      jitterIntensityContainer.style.opacity = jitterToggle.checked ? '1' : '0.3';
-      jitterIntensityContainer.style.pointerEvents = jitterToggle.checked ? 'auto' : 'none';
+      gpsQualityContainer.style.opacity = jitterToggle.checked ? '1' : '0.3';
+      gpsQualityContainer.style.pointerEvents = jitterToggle.checked ? 'auto' : 'none';
+      gpsCustomIntensity.style.opacity = jitterToggle.checked ? '1' : '0.3';
+      gpsCustomIntensity.style.pointerEvents = jitterToggle.checked ? 'auto' : 'none';
+    });
+
+    gpsQualitySelect.addEventListener('change', () => {
+      if (gpsQualitySelect.value === 'custom') {
+        gpsCustomIntensity.classList.remove('hidden');
+      } else {
+        gpsCustomIntensity.classList.add('hidden');
+      }
     });
 
     jitterSlider.addEventListener('input', () => {
       jitterValue.textContent = (parseInt(jitterSlider.value) / 10).toFixed(1) + '×';
-      updateSliderBg(jitterSlider, 1, 30);
+      updateSliderBg(jitterSlider, 1, 50);
     });
 
     loopToggle.addEventListener('change', () => {
@@ -1081,7 +1121,8 @@
         elevations,
         speed: parseInt(speedSlider.value),
         jitter: jitterToggle.checked,
-        jitterIntensity: parseInt(jitterSlider.value) / 10,
+        jitterIntensity: getJitterIntensity(),
+        jitterUrbanMult: getJitterUrbanMult(),
         loop: loopToggle.checked,
         laps: loopToggle.checked ? parseInt(lapCount.value) || 3 : 1,
         autoPause: autoPauseToggle.checked,
@@ -1147,7 +1188,7 @@
     bindDual(restIntMin, restIntMax, restIntVal, ' km');
     bindDual(restDurMin, restDurMax, restDurVal, 's');
     updateSliderBg(speedSlider, 1, 60);
-    updateSliderBg(jitterSlider, 1, 30);
+    updateSliderBg(jitterSlider, 1, 50);
   }
 
   function init() { initMap(); bindEvents(); connectWS(); }

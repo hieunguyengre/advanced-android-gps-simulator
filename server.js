@@ -553,30 +553,41 @@ class NaturalSpeedEngine {
 }
 
 // ====================================================================
-// GPS JITTER ENGINE (Enhanced — urban noise + stationary drift)
+// GPS JITTER ENGINE — Research-based GPS noise simulation
+// Based on real GPS data analysis from Strava/DC Rainmaker:
+// - Premium watch (dual-band): ~0.5m deviation
+// - Standard watch: ~1.5m deviation
+// - Phone (good): ~2m, urban: ~4m, poor: ~6m
+// Key insight: real GPS noise is random walk, NOT sinusoidal
 // ====================================================================
 class GPSJitter {
   constructor() {
     this.enabled = true;
-    this.intensity = 1.0;
+    this.intensity = 1.0;       // base multiplier (preset-controlled)
+    this.urbanMultBase = 0.5;   // urban noise factor (preset-controlled)
     this.offsetLat = 0;
     this.offsetLng = 0;
     this.velocityLat = 0;
     this.velocityLng = 0;
     this.lapSeed = 0;
 
-    // Stationary drift state (GPS wanders when stopped)
+    // Stationary drift state
     this.stationaryDriftLat = 0;
     this.stationaryDriftLng = 0;
     this.stationaryDriftVelLat = 0;
     this.stationaryDriftVelLng = 0;
     this.stationaryTimer = 0;
+
+    // Smooth Gaussian noise state
+    this._gaussSpare = null;
+    this._gaussHasSpare = false;
   }
 
   setLapSeed(seed) {
     this.lapSeed = seed;
-    this.offsetLat = (this._seededRandom(seed * 1000) - 0.5) * 0.00002;
-    this.offsetLng = (this._seededRandom(seed * 2000) - 0.5) * 0.00002;
+    // Small initial offset per lap (different starting bias)
+    this.offsetLat = (this._seededRandom(seed * 1000) - 0.5) * 0.000008 * this.intensity;
+    this.offsetLng = (this._seededRandom(seed * 2000) - 0.5) * 0.000008 * this.intensity;
   }
 
   _seededRandom(seed) {
@@ -584,71 +595,96 @@ class GPSJitter {
     return x - Math.floor(x);
   }
 
-  // urbanDensity: 0=open area, 1=dense urban (derived from turn density)
+  // Box-Muller Gaussian random (mean=0, std=1)
+  _gaussRandom() {
+    if (this._gaussHasSpare) {
+      this._gaussHasSpare = false;
+      return this._gaussSpare;
+    }
+    let u, v, s;
+    do {
+      u = Math.random() * 2 - 1;
+      v = Math.random() * 2 - 1;
+      s = u * u + v * v;
+    } while (s >= 1 || s === 0);
+    s = Math.sqrt(-2.0 * Math.log(s) / s);
+    this._gaussSpare = v * s;
+    this._gaussHasSpare = true;
+    return u * s;
+  }
+
+  // urbanDensity: 0=open area, 1=dense urban (from turn density analysis)
   // isStationary: true when paused/resting
   apply(lat, lng, progress, urbanDensity = 0, isStationary = false) {
     if (!this.enabled) return { lat, lng };
 
-    // Urban noise multiplier: open area=1x, dense urban=2.5x
-    const urbanMultiplier = 1.0 + urbanDensity * 1.5;
+    // Urban multiplier: scales with preset-defined sensitivity
+    const urbanMultiplier = 1.0 + urbanDensity * this.urbanMultBase;
     const effectiveIntensity = this.intensity * urbanMultiplier;
 
     if (isStationary) {
-      // STATIONARY DRIFT — GPS never stays perfectly still
-      // Slow random walk within ~1-3 meters
       return this._applyStationaryDrift(lat, lng, effectiveIntensity);
     }
 
-    // MOVING JITTER — normal mode
-    const maxOffset = 0.00004 * effectiveIntensity;
-    const seed1 = progress * 1000 + this.lapSeed * 7.13;
-    const seed2 = progress * 1000 + this.lapSeed * 11.37 + 500;
+    // === MOVING JITTER — Gaussian random walk ===
+    // 1 degree ≈ 111,320m, so 0.00001° ≈ 1.1m
+    // Target: effectiveIntensity=1.0 → ~1.5m max deviation
+    const noiseScale = 0.000008 * effectiveIntensity;  // ~0.9m per unit
+    const maxOffset = 0.000015 * effectiveIntensity;   // clamp radius
 
-    this.velocityLat += (this._seededRandom(seed1 + this.offsetLat * 100000) - 0.5) * 0.3 * 0.00001 * effectiveIntensity;
-    this.velocityLng += (this._seededRandom(seed2 + this.offsetLng * 100000) - 0.5) * 0.3 * 0.00001 * effectiveIntensity;
+    // Gaussian acceleration (smooth random walk, not choppy)
+    this.velocityLat += this._gaussRandom() * noiseScale * 0.08;
+    this.velocityLng += this._gaussRandom() * noiseScale * 0.08;
 
-    this.velocityLat -= this.offsetLat * 0.05;
-    this.velocityLng -= this.offsetLng * 0.05;
-    this.velocityLat *= 0.85;
-    this.velocityLng *= 0.85;
+    // Mean-reversion: pulls offset back toward center (stronger = tighter trace)
+    // Higher intensity = weaker reversion = more wandering
+    const reversion = Math.max(0.04, 0.15 / Math.max(0.5, effectiveIntensity));
+    this.velocityLat -= this.offsetLat * reversion;
+    this.velocityLng -= this.offsetLng * reversion;
 
-    this.offsetLat = Math.max(-maxOffset, Math.min(maxOffset, this.offsetLat + this.velocityLat));
-    this.offsetLng = Math.max(-maxOffset, Math.min(maxOffset, this.offsetLng + this.velocityLng));
+    // Damping (prevents runaway velocity)
+    const damping = 0.88;
+    this.velocityLat *= damping;
+    this.velocityLng *= damping;
 
-    const lapDriftLat = Math.sin(progress * Math.PI * 4 + this.lapSeed * 2.71) * 0.00002 * effectiveIntensity;
-    const lapDriftLng = Math.cos(progress * Math.PI * 3 + this.lapSeed * 3.14) * 0.00002 * effectiveIntensity;
+    this.offsetLat += this.velocityLat;
+    this.offsetLng += this.velocityLng;
 
-    // Reset stationary drift for when we stop again
+    // Hard clamp
+    this.offsetLat = Math.max(-maxOffset, Math.min(maxOffset, this.offsetLat));
+    this.offsetLng = Math.max(-maxOffset, Math.min(maxOffset, this.offsetLng));
+
+    // Reset stationary state
     this.stationaryDriftLat = 0;
     this.stationaryDriftLng = 0;
     this.stationaryTimer = 0;
 
     return {
-      lat: lat + this.offsetLat + lapDriftLat,
-      lng: lng + this.offsetLng + lapDriftLng
+      lat: lat + this.offsetLat,
+      lng: lng + this.offsetLng
     };
   }
 
   _applyStationaryDrift(lat, lng, intensity) {
-    // GPS drift when stopped: slow random walk, ~1-3m radius
-    // Typical real GPS behavior — coordinate wanders around true position
+    // GPS wanders when stopped — slow random walk
+    // Real behavior: ~1-2m cluster for watch, ~2-4m for phone
     this.stationaryTimer++;
 
-    const maxDrift = 0.00003 * intensity; // ~3m
-    const driftForce = 0.000002 * intensity;
+    const maxDrift = 0.000012 * intensity;     // ~1.3m per unit
+    const driftForce = 0.0000005 * intensity;
 
-    // Random force with slow frequency (changes every ~2-5 seconds = 20-50 ticks)
-    const slowSeed1 = Math.floor(this.stationaryTimer / 30);
-    const slowSeed2 = Math.floor(this.stationaryTimer / 40) + 1000;
+    // Slow-changing force (updates every ~3-5 seconds)
+    const slowSeed1 = Math.floor(this.stationaryTimer / 40);
+    const slowSeed2 = Math.floor(this.stationaryTimer / 55) + 1000;
 
     this.stationaryDriftVelLat += (this._seededRandom(slowSeed1 + lat * 10000) - 0.5) * driftForce;
     this.stationaryDriftVelLng += (this._seededRandom(slowSeed2 + lng * 10000) - 0.5) * driftForce;
 
     // Mean reversion + damping
-    this.stationaryDriftVelLat -= this.stationaryDriftLat * 0.02;
-    this.stationaryDriftVelLng -= this.stationaryDriftLng * 0.02;
-    this.stationaryDriftVelLat *= 0.92;
-    this.stationaryDriftVelLng *= 0.92;
+    this.stationaryDriftVelLat -= this.stationaryDriftLat * 0.05;
+    this.stationaryDriftVelLng -= this.stationaryDriftLng * 0.05;
+    this.stationaryDriftVelLat *= 0.88;
+    this.stationaryDriftVelLng *= 0.88;
 
     this.stationaryDriftLat += this.stationaryDriftVelLat;
     this.stationaryDriftLng += this.stationaryDriftVelLng;
@@ -738,6 +774,7 @@ class RouteSimulator {
     this.totalLaps = options.laps || 1;
     this.jitter.enabled = options.jitter !== false;
     this.jitter.intensity = options.jitterIntensity || 1.0;
+    this.jitter.urbanMultBase = options.jitterUrbanMult ?? 0.5;
     this.jitter.setLapSeed(0);
     this.autoPauseEnabled = options.autoPause !== false;
 
@@ -1073,6 +1110,7 @@ wss.on('connection', (ws) => {
             laps: msg.laps || 1,
             jitter: msg.jitter !== false,
             jitterIntensity: msg.jitterIntensity || 1.0,
+            jitterUrbanMult: msg.jitterUrbanMult ?? 0.5,
             autoPause: msg.autoPause !== false,
             advanced: msg.advanced || {}
           });

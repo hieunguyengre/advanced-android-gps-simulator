@@ -219,12 +219,23 @@
           <label class="toggle-label">
             <input type="checkbox" id="jitterToggle" checked>
             <span class="toggle-switch"></span>
-            GPS Randomize
+            GPS Noise
           </label>
-          <div class="jitter-intensity" id="jitterIntensityContainer">
-            <input type="range" id="jitterSlider" min="1" max="30" value="10" class="slider slider-sm">
-            <span class="jitter-value" id="jitterValue">1.0×</span>
+          <div class="gps-quality-select" id="gpsQualityContainer">
+            <select id="gpsQualitySelect" class="select-sm">
+              <option value="premium">📡 Premium Watch (~0.5m)</option>
+              <option value="standard" selected>⌚ Standard Watch (~1.5m)</option>
+              <option value="phone_good">📱 Phone - Good (~2m)</option>
+              <option value="phone_urban">🏙️ Phone - Urban (~4m)</option>
+              <option value="phone_poor">🌳 Phone - Poor (~6m)</option>
+              <option value="custom">⚙️ Custom</option>
+            </select>
           </div>
+        </div>
+        <div class="gps-custom-intensity hidden" id="gpsCustomIntensity">
+          <label>Custom Intensity <span class="jitter-value" id="jitterValue">1.0×</span></label>
+          <input type="range" id="jitterSlider" min="1" max="50" value="10" class="slider slider-sm">
+          <div class="setting-hint">1 = no noise, 10 = standard watch, 50 = very poor signal</div>
         </div>
 
         <div class="option-row">
