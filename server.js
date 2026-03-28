@@ -81,52 +81,196 @@ app.get('/api/random-route', async (req, res) => {
 });
 
 /**
- * Generate waypoints for a closed-loop running route.
- * Creates an organic loop shape: start → outward → loop around → return to start.
+ * Generate waypoints for a natural-looking running route loop.
+ * Uses multiple shape strategies to avoid the "perfect circle" look:
+ *   1. Out-and-back with side exploration (most common real running pattern)
+ *   2. Figure-8 / Lollipop (run somewhere, loop, come back)
+ *   3. Organic irregular shape (Perlin-like noise for non-circular blob)
  */
 function generateRandomLoopWaypoints(centerLat, centerLng, radiusMeters, targetDistanceKm) {
-  // Number of intermediate waypoints scales with target distance
-  const numPoints = Math.min(8, Math.max(4, Math.round(targetDistanceKm * 1.5)));
-
-  // Convert radius to approximate degrees
   const latPerMeter = 1 / 111320;
   const lngPerMeter = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
 
-  const waypoints = [];
+  // Pick a random shape strategy
+  const strategy = Math.random();
+  let waypoints;
 
-  // Start point
-  waypoints.push({ lat: centerLat, lng: centerLng });
+  if (strategy < 0.35) {
+    waypoints = _generateOutAndBack(centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter);
+  } else if (strategy < 0.6) {
+    waypoints = _generateLollipop(centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter);
+  } else {
+    waypoints = _generateOrganicLoop(centerLat, centerLng, radiusMeters, targetDistanceKm, latPerMeter, lngPerMeter);
+  }
 
-  // Generate intermediate points around the center at varying distances
-  // Use a strategy to create a natural-looking loop shape
-  const angleOffset = Math.random() * Math.PI * 2; // Random starting direction
+  return waypoints;
+}
 
-  for (let i = 0; i < numPoints; i++) {
-    const fraction = i / numPoints;
-    const angle = angleOffset + fraction * Math.PI * 2;
+/**
+ * Strategy 1: Out-and-back with a side exploration loop.
+ * Simulates a runner going out, exploring an area off to one side, then returning via
+ * a slightly different path. Very natural — most casual runners do this.
+ */
+function _generateOutAndBack(cLat, cLng, radius, distKm, latPM, lngPM) {
+  const wp = [];
+  const mainAngle = Math.random() * Math.PI * 2;
+  const sideDir = Math.random() < 0.5 ? 1 : -1; // explore left or right
 
-    // Vary the radius for organic shape: 40-100% of max radius
-    // Create a "petal" or "blob" shape with some randomness
-    const radiusVariation = 0.4 + Math.random() * 0.6;
-    const pointRadius = radiusMeters * radiusVariation;
+  // Start
+  wp.push({ lat: cLat, lng: cLng });
 
-    // Add slight angle perturbation for naturalness
-    const anglePerturbation = (Math.random() - 0.5) * (Math.PI / numPoints);
-    const finalAngle = angle + anglePerturbation;
+  // Go outward (3-4 waypoints along main direction)
+  const outSteps = 2 + Math.floor(Math.random() * 2);
+  for (let i = 1; i <= outSteps; i++) {
+    const frac = i / (outSteps + 1);
+    const dist = radius * frac * (0.7 + Math.random() * 0.5);
+    // Slight zigzag along the main direction
+    const angleJitter = (Math.random() - 0.5) * 0.4;
+    const sideShift = sideDir * Math.random() * radius * 0.15 * frac;
+    const dLat = dist * Math.cos(mainAngle + angleJitter) * latPM + sideShift * Math.cos(mainAngle + Math.PI / 2) * latPM;
+    const dLng = dist * Math.sin(mainAngle + angleJitter) * lngPM + sideShift * Math.sin(mainAngle + Math.PI / 2) * lngPM;
+    wp.push({ lat: cLat + dLat, lng: cLng + dLng });
+  }
 
-    const dLat = pointRadius * Math.cos(finalAngle) * latPerMeter;
-    const dLng = pointRadius * Math.sin(finalAngle) * lngPerMeter;
-
-    waypoints.push({
-      lat: centerLat + dLat,
-      lng: centerLng + dLng
+  // Side exploration loop (2-3 waypoints off the main path)
+  const turnaroundDist = radius * (0.7 + Math.random() * 0.4);
+  const loopPoints = 2 + Math.floor(Math.random() * 2);
+  const loopAngleStart = mainAngle + sideDir * (0.4 + Math.random() * 0.6);
+  for (let i = 0; i < loopPoints; i++) {
+    const frac = i / loopPoints;
+    const loopAngle = loopAngleStart + frac * sideDir * Math.PI * 0.6;
+    const loopR = turnaroundDist * (0.5 + Math.random() * 0.5);
+    wp.push({
+      lat: cLat + loopR * Math.cos(loopAngle) * latPM,
+      lng: cLng + loopR * Math.sin(loopAngle) * lngPM
     });
   }
 
-  // Close the loop — return to start
-  waypoints.push({ lat: centerLat, lng: centerLng });
+  // Return path (slightly different from outward path — offset to opposite side)
+  for (let i = outSteps; i >= 1; i--) {
+    const frac = i / (outSteps + 1);
+    const dist = radius * frac * (0.5 + Math.random() * 0.4);
+    const offsetAngle = mainAngle + (Math.random() - 0.5) * 0.5;
+    const returnShift = -sideDir * radius * 0.12 * frac;
+    const dLat = dist * Math.cos(offsetAngle) * latPM + returnShift * Math.cos(mainAngle + Math.PI / 2) * latPM;
+    const dLng = dist * Math.sin(offsetAngle) * lngPM + returnShift * Math.sin(mainAngle + Math.PI / 2) * lngPM;
+    wp.push({ lat: cLat + dLat, lng: cLng + dLng });
+  }
 
-  return waypoints;
+  // Return to start
+  wp.push({ lat: cLat, lng: cLng });
+  return wp;
+}
+
+/**
+ * Strategy 2: Lollipop / Figure-8.
+ * Run from start to a distant area, do a small loop there, then come back.
+ * Like running to a park, doing a lap, and running home.
+ */
+function _generateLollipop(cLat, cLng, radius, distKm, latPM, lngPM) {
+  const wp = [];
+  const stickAngle = Math.random() * Math.PI * 2;
+  const stickLength = radius * (0.6 + Math.random() * 0.4);
+
+  // Start
+  wp.push({ lat: cLat, lng: cLng });
+
+  // "Stick" portion — walk to loop center (2-3 intermediate points)
+  const stickSteps = 2 + Math.floor(Math.random());
+  const loopCenterLat = cLat + stickLength * Math.cos(stickAngle) * latPM;
+  const loopCenterLng = cLng + stickLength * Math.sin(stickAngle) * lngPM;
+
+  for (let i = 1; i <= stickSteps; i++) {
+    const frac = i / (stickSteps + 1);
+    const jitter = (Math.random() - 0.5) * radius * 0.1;
+    wp.push({
+      lat: cLat + frac * (loopCenterLat - cLat) + jitter * latPM,
+      lng: cLng + frac * (loopCenterLng - cLng) + jitter * lngPM
+    });
+  }
+
+  // "Lollipop" loop — circle around the loop center (4-6 points)
+  const loopRadius = radius * (0.25 + Math.random() * 0.3);
+  const loopSteps = 4 + Math.floor(Math.random() * 3);
+  const loopStart = Math.random() * Math.PI * 2;
+  const loopDir = Math.random() < 0.5 ? 1 : -1;
+
+  for (let i = 0; i < loopSteps; i++) {
+    const frac = (i + 1) / (loopSteps + 1);
+    const angle = loopStart + loopDir * frac * Math.PI * 2;
+    // Add radius variation so it's not a perfect circle
+    const rVar = loopRadius * (0.7 + Math.random() * 0.5);
+    wp.push({
+      lat: loopCenterLat + rVar * Math.cos(angle) * latPM,
+      lng: loopCenterLng + rVar * Math.sin(angle) * lngPM
+    });
+  }
+
+  // Return along the stick (slightly different path)
+  for (let i = stickSteps; i >= 1; i--) {
+    const frac = i / (stickSteps + 1);
+    const jitter = (Math.random() - 0.5) * radius * 0.15;
+    wp.push({
+      lat: cLat + frac * (loopCenterLat - cLat) + jitter * latPM,
+      lng: cLng + frac * (loopCenterLng - cLng) + jitter * lngPM
+    });
+  }
+
+  // Return to start
+  wp.push({ lat: cLat, lng: cLng });
+  return wp;
+}
+
+/**
+ * Strategy 3: Organic irregular loop.
+ * Uses layered sine waves (Perlin-like noise) to create a non-circular blob shape.
+ * Much more natural than a simple circle with jittered points.
+ */
+function _generateOrganicLoop(cLat, cLng, radius, distKm, latPM, lngPM) {
+  const wp = [];
+  const numPoints = Math.min(10, Math.max(5, Math.round(targetDistanceKm_to_points(distKm))));
+  const angleOffset = Math.random() * Math.PI * 2;
+
+  // Generate organic noise phases for radius variation
+  const phases = [
+    { freq: 2 + Math.random(), amp: 0.3 + Math.random() * 0.2, phase: Math.random() * Math.PI * 2 },
+    { freq: 3 + Math.random() * 2, amp: 0.15 + Math.random() * 0.1, phase: Math.random() * Math.PI * 2 },
+    { freq: 5 + Math.random() * 3, amp: 0.08 + Math.random() * 0.05, phase: Math.random() * Math.PI * 2 }
+  ];
+
+  // Start
+  wp.push({ lat: cLat, lng: cLng });
+
+  for (let i = 0; i < numPoints; i++) {
+    const frac = i / numPoints;
+    const baseAngle = angleOffset + frac * Math.PI * 2;
+
+    // Multi-frequency radius modulation (organic shape)
+    let radiusMod = 0.6;
+    for (const p of phases) {
+      radiusMod += p.amp * Math.sin(frac * Math.PI * 2 * p.freq + p.phase);
+    }
+    radiusMod = Math.max(0.25, Math.min(1.1, radiusMod));
+
+    // Add per-point jitter to angle
+    const angleJitter = (Math.random() - 0.5) * (Math.PI * 2 / numPoints) * 0.4;
+    const finalAngle = baseAngle + angleJitter;
+    const finalRadius = radius * radiusMod;
+
+    wp.push({
+      lat: cLat + finalRadius * Math.cos(finalAngle) * latPM,
+      lng: cLng + finalRadius * Math.sin(finalAngle) * lngPM
+    });
+  }
+
+  // Close the loop
+  wp.push({ lat: cLat, lng: cLng });
+  return wp;
+}
+
+function targetDistanceKm_to_points(distKm) {
+  // More points for longer routes, but cap at 10
+  return Math.round(distKm * 1.8 + 2);
 }
 
 // --- Search Routes API (Multi-Source: Overpass + Waymarked Trails) ---
