@@ -551,6 +551,41 @@
     updateRouteUI();
   }
 
+  function undoLastWaypoint() {
+    if (waypoints.length === 0 || isRouteRunning) return;
+
+    // Remove last waypoint and its marker
+    waypoints.pop();
+    const marker = waypointMarkers.pop();
+    if (marker) map.removeLayer(marker);
+
+    // Update preview polyline
+    updatePreviewPolyline();
+
+    if (waypoints.length >= 2) {
+      // Re-process route
+      if (routingMode === 'road') fetchRoadRoute();
+      else buildFreeformRoute();
+    } else {
+      // Not enough points for a route — clear it
+      routePoints = [];
+      elevations = [];
+      if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
+      routeDistance.textContent = '';
+    }
+
+    updateRouteUI();
+    showToast(`Undo waypoint (${waypoints.length} remaining)`, 'info');
+  }
+
+  // Ctrl+Z — undo last waypoint (only in route mode)
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && mode === 'route') {
+      e.preventDefault();
+      undoLastWaypoint();
+    }
+  });
+
   function updatePreviewPolyline() {
     const latlngs = waypoints.map(w => [w.lat, w.lng]);
     const color = routingMode === 'freeform' ? '#f59e0b' : '#6387ff';
