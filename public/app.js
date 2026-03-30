@@ -309,8 +309,10 @@
       // Fit map to route
       map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
 
-      // Show route controls for Start/Pause/Stop
+      // Show route controls for Start/Pause/Stop (hide routing mode toggle — only for Route mode)
       routeControls.classList.remove('hidden');
+      document.querySelector('.routing-mode-toggle').style.display = 'none';
+      $('routingModeHint').style.display = 'none';
 
     } catch (err) {
       showToast('Route generation error: ' + err.message, 'error');
@@ -496,8 +498,10 @@
     // Fit map
     map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
 
-    // Show route controls
+    // Show route controls (hide routing mode toggle — only for Route mode)
     routeControls.classList.remove('hidden');
+    document.querySelector('.routing-mode-toggle').style.display = 'none';
+    $('routingModeHint').style.display = 'none';
     updateRouteUI();
   }
 
@@ -1229,6 +1233,8 @@
       mode = 'route';
       modeRoute.classList.add('active');
       routeControls.classList.remove('hidden');
+      document.querySelector('.routing-mode-toggle').style.display = '';
+      $('routingModeHint').style.display = '';
       map.getContainer().style.cursor = 'crosshair';
     });
 
