@@ -23,6 +23,7 @@
   let searchPreviewPolylines = [];
   let searchSelectedRoute = null;
   let searchRadiusCircle = null;
+  let routingMode = 'road'; // 'road' (OSRM snap) or 'freeform' (direct + smooth)
 
   // ===== GPS Signal Quality Presets (research-based) =====
   // Real GPS deviation: Premium watch ~0.5m, Standard ~1.5m, Phone ~2-6m
@@ -537,23 +538,133 @@
     waypoints.push({ lat, lng });
     const idx = waypoints.length;
     const marker = L.circleMarker([lat, lng], {
-      radius: 8, color: '#fff', fillColor: '#6387ff', fillOpacity: 1, weight: 2
+      radius: 8, color: '#fff', fillColor: routingMode === 'freeform' ? '#f59e0b' : '#6387ff', fillOpacity: 1, weight: 2
     }).addTo(map);
     marker.bindPopup(`<b>Waypoint ${idx}</b><br>${lat.toFixed(5)}, ${lng.toFixed(5)}`);
     waypointMarkers.push(marker);
     updatePreviewPolyline();
-    if (waypoints.length >= 2) fetchRoadRoute();
+    if (routingMode === 'road') {
+      if (waypoints.length >= 2) fetchRoadRoute();
+    } else {
+      buildFreeformRoute();
+    }
     updateRouteUI();
   }
 
   function updatePreviewPolyline() {
     const latlngs = waypoints.map(w => [w.lat, w.lng]);
-    if (previewPolyline) { previewPolyline.setLatLngs(latlngs); }
-    else {
+    const color = routingMode === 'freeform' ? '#f59e0b' : '#6387ff';
+    if (previewPolyline) {
+      previewPolyline.setLatLngs(latlngs);
+      previewPolyline.setStyle({ color });
+    } else {
       previewPolyline = L.polyline(latlngs, {
-        color: '#6387ff', weight: 2, opacity: 0.4, dashArray: '6, 8', smoothFactor: 1
+        color, weight: 2, opacity: 0.4, dashArray: '6, 8', smoothFactor: 1
       }).addTo(map);
     }
+  }
+
+  // --- Freeform Route (Direct connect + Catmull-Rom smoothing) ---
+  function buildFreeformRoute() {
+    if (waypoints.length < 2) return;
+
+    // Generate smoothed points using Catmull-Rom spline
+    const smoothed = catmullRomSmooth(waypoints, 20); // 20 interpolation points per segment
+    routePoints = smoothed;
+
+    // Draw the smoothed route
+    const latlngs = routePoints.map(p => [p.lat, p.lng]);
+    if (routePolyline) { routePolyline.setLatLngs(latlngs); }
+    else {
+      routePolyline = L.polyline(latlngs, {
+        color: '#f59e0b', weight: 4, opacity: 0.85, smoothFactor: 1, lineCap: 'round', lineJoin: 'round'
+      }).addTo(map);
+    }
+
+    // Calculate total distance
+    let totalDist = 0;
+    for (let i = 0; i < routePoints.length - 1; i++) {
+      totalDist += haversineLocal(routePoints[i].lat, routePoints[i].lng, routePoints[i + 1].lat, routePoints[i + 1].lng);
+    }
+    const distKm = (totalDist / 1000).toFixed(2);
+    routeDistance.textContent = `(${distKm} km)`;
+
+    // Fetch elevation for the smoothed points
+    fetchElevations();
+    updateRouteUI();
+  }
+
+  /**
+   * Catmull-Rom spline interpolation for smooth curves through waypoints.
+   * Uses centripetal parameterization (alpha=0.5) for balanced smoothness.
+   */
+  function catmullRomSmooth(points, numPerSeg = 20) {
+    if (points.length < 2) return [...points];
+    if (points.length === 2) {
+      // Just interpolate linearly between 2 points
+      const result = [];
+      for (let t = 0; t <= 1; t += 1 / numPerSeg) {
+        result.push({
+          lat: points[0].lat + (points[1].lat - points[0].lat) * t,
+          lng: points[0].lng + (points[1].lng - points[0].lng) * t
+        });
+      }
+      result.push({ lat: points[1].lat, lng: points[1].lng });
+      return result;
+    }
+
+    const result = [];
+
+    // Extend control points: mirror first and last to create phantom endpoints
+    const extended = [
+      { lat: 2 * points[0].lat - points[1].lat, lng: 2 * points[0].lng - points[1].lng },
+      ...points,
+      { lat: 2 * points[points.length - 1].lat - points[points.length - 2].lat,
+        lng: 2 * points[points.length - 1].lng - points[points.length - 2].lng }
+    ];
+
+    for (let i = 0; i < extended.length - 3; i++) {
+      const p0 = extended[i];
+      const p1 = extended[i + 1];
+      const p2 = extended[i + 2];
+      const p3 = extended[i + 3];
+
+      for (let j = 0; j < numPerSeg; j++) {
+        const t = j / numPerSeg;
+        const t2 = t * t;
+        const t3 = t2 * t;
+
+        // Catmull-Rom basis matrix
+        const lat = 0.5 * (
+          (2 * p1.lat) +
+          (-p0.lat + p2.lat) * t +
+          (2 * p0.lat - 5 * p1.lat + 4 * p2.lat - p3.lat) * t2 +
+          (-p0.lat + 3 * p1.lat - 3 * p2.lat + p3.lat) * t3
+        );
+        const lng = 0.5 * (
+          (2 * p1.lng) +
+          (-p0.lng + p2.lng) * t +
+          (2 * p0.lng - 5 * p1.lng + 4 * p2.lng - p3.lng) * t2 +
+          (-p0.lng + 3 * p1.lng - 3 * p2.lng + p3.lng) * t3
+        );
+
+        result.push({ lat, lng });
+      }
+    }
+
+    // Always include the last point
+    result.push({ lat: points[points.length - 1].lat, lng: points[points.length - 1].lng });
+    return result;
+  }
+
+  function haversineLocal(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   // --- OSRM Road Route + Elevation ---
@@ -1084,6 +1195,26 @@
       modeRoute.classList.add('active');
       routeControls.classList.remove('hidden');
       map.getContainer().style.cursor = 'crosshair';
+    });
+
+    // Routing mode toggle (Road Snap / Freeform)
+    document.querySelectorAll('.routing-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.routing-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        routingMode = btn.dataset.rmode;
+        const hint = $('routingModeHint');
+        if (routingMode === 'freeform') {
+          hint.textContent = 'Points connected directly — you choose the path';
+        } else {
+          hint.textContent = 'Routes snap to real roads via OSRM';
+        }
+        // Re-process existing waypoints if any
+        if (waypoints.length >= 2) {
+          if (routingMode === 'road') fetchRoadRoute();
+          else buildFreeformRoute();
+        }
+      });
     });
 
     // GPX Import

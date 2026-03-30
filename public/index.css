@@ -704,6 +704,51 @@ body {
   min-width: 22px;
 }
 
+/* ===== Routing Mode Toggle ===== */
+.routing-mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  margin-bottom: 4px;
+}
+
+.routing-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.routing-mode-btn:hover { color: var(--text-primary); }
+
+.routing-mode-btn.active {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.routing-mode-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 10px;
+  opacity: 0.7;
+}
+
 /* ===== Route Buttons ===== */
 .route-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .route-buttons .btn { font-size: 11px; padding: 8px 10px; }

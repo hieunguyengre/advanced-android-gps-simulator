@@ -218,6 +218,19 @@
       </div>
 
       <div id="routeControls" class="route-controls hidden">
+        <!-- Routing Mode Toggle -->
+        <div class="routing-mode-toggle">
+          <button class="routing-mode-btn active" id="routingModeRoad" data-rmode="road">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19L12 5l8 14"/><line x1="7" y1="14" x2="17" y2="14"/></svg>
+            🛣️ Road Snap
+          </button>
+          <button class="routing-mode-btn" id="routingModeFreeform" data-rmode="freeform">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17c3-5 7 3 10-2s5-8 8-3"/></svg>
+            🚶 Freeform
+          </button>
+        </div>
+        <div class="routing-mode-hint" id="routingModeHint">Routes snap to real roads via OSRM</div>
+
         <!-- Activity Profile Selector -->
         <div class="profile-selector">
           <label class="profile-label">Activity:</label>
