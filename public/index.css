@@ -92,7 +92,19 @@ body {
 
 .panel-connection { top: 16px; left: 16px; }
 .panel-info { top: 16px; right: 16px; min-width: 220px; animation-delay: 0.05s; }
-.panel-route { bottom: 16px; left: 16px; min-width: 340px; animation-delay: 0.1s; }
+.panel-route {
+  bottom: 16px;
+  left: 16px;
+  min-width: 340px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  animation-delay: 0.1s;
+}
+
+.panel-route::-webkit-scrollbar { width: 5px; }
+.panel-route::-webkit-scrollbar-track { background: transparent; }
+.panel-route::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.panel-route::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
 
 .panel-header {
   display: flex;
